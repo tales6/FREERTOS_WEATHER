@@ -1,0 +1,33 @@
+# 用户设置（每个开发者不同）
+*.uvguix.*
+*.uvoptx
+
+# 构建输出
+*.o
+*.d
+*.crf
+*.dep
+*.axf
+*.hex
+*.bin
+*.map
+*.htm
+*.sct
+*.lnk
+
+# 调试配置
+DebugConfig/
+JLinkLog.txt
+*.JLink*
+*.scvd
+*.bak
+
+# 列表文件
+*.lst
+
+# IDE / 编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+*~

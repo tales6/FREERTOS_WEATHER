@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>模块详解 — NTP 时间同步</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:'Segoe UI','Microsoft YaHei',sans-serif; background:#f0f2f5; color:#333; line-height:1.7; }
+.header { background:linear-gradient(135deg,#e65100,#ef6c00); color:#fff; padding:40px 0 30px; text-align:center; }
+.header h1 { font-size:2em; font-weight:700; }
+.header .sub { margin-top:6px; font-size:.95em; opacity:.85; }
+.header .file { margin-top:10px; font-size:.8em; opacity:.7; }
+nav { background:#ef6c00; padding:10px 0; position:sticky; top:0; z-index:100; box-shadow:0 2px 8px rgba(0,0,0,.2); }
+nav ul { list-style:none; display:flex; flex-wrap:wrap; justify-content:center; gap:4px; padding:0 20px; }
+nav ul li a { color:#ffe0b2; text-decoration:none; padding:5px 12px; border-radius:4px; font-size:.85em; transition:.2s; }
+nav ul li a:hover { background:rgba(255,255,255,.12); color:#fff; }
+.container { max-width:1000px; margin:0 auto; padding:25px 20px; }
+.section { background:#fff; border-radius:10px; margin-bottom:25px; padding:28px 30px; box-shadow:0 1px 4px rgba(0,0,0,.06); }
+.section h2 { font-size:1.4em; color:#e65100; border-left:4px solid #ff9800; padding-left:14px; margin-bottom:16px; }
+.section h3 { font-size:1.1em; color:#ef6c00; margin:18px 0 10px; }
+.section h4 { font-size:.98em; color:#455a64; margin:12px 0 6px; }
+.section p { margin:6px 0; }
+.section ul { margin:6px 0 6px 20px; }
+.section ul li { margin:3px 0; }
+code { font-family:'Cascadia Code','Fira Code','Consolas',monospace; font-size:.9em; }
+pre { background:#1e1e2e; color:#cdd6f4; border-radius:8px; padding:14px 18px; overflow-x:auto; font-size:.8em; line-height:1.5; margin:10px 0; }
+pre .kw { color:#89b4fa; } pre .fn { color:#a6e3a1; } pre .str { color:#fab387; }
+pre .cm { color:#6c7086; } pre .num { color:#f9e2af; } pre .tp { color:#cba6f7; }
+pre .mp { color:#94e2d5; } pre .op { color:#89dceb; }
+.tag { display:inline-block; background:#fff3e0; color:#e65100; border-radius:4px; padding:0 7px; font-size:.76em; font-weight:600; margin-right:3px; }
+.tag-red { background:#ffebee; color:#c62828; }
+.tag-green { background:#e8f5e9; color:#2e7d32; }
+.tag-blue { background:#e3f2fd; color:#1565c0; }
+.table-wrap { overflow-x:auto; }
+table { width:100%; border-collapse:collapse; margin:10px 0; font-size:.86em; }
+th { background:#fff3e0; color:#e65100; text-align:left; padding:8px 10px; border:1px solid #ffcc80; }
+td { padding:7px 10px; border:1px solid #e0e0e0; }
+tr:nth-child(even) { background:#fafafa; }
+tr:hover { background:#f5f5f5; }
+.callout { background:#fff3e0; border-left:4px solid #ff9800; padding:12px 16px; border-radius:4px; margin:10px 0; font-size:.9em; }
+.callout-green { background:#e8f5e9; border-left:4px solid #4caf50; padding:12px 16px; border-radius:4px; margin:10px 0; font-size:.9em; }
+.callout-red { background:#ffebee; border-left:4px solid #f44336; padding:12px 16px; border-radius:4px; margin:10px 0; font-size:.9em; }
+.flow { text-align:center; padding:12px; background:#fafafa; border-radius:6px; margin:8px 0; font-size:.85em; color:#555; }
+.flow .arrow { color:#ff9800; font-weight:700; }
+.step-box { background:#f5f5f5; border-radius:6px; padding:14px 18px; margin:10px 0; }
+.step-num { display:inline-block; background:#ff9800; color:#fff; border-radius:50%; width:24px; height:24px; text-align:center; line-height:24px; font-size:.8em; font-weight:700; margin-right:8px; }
+.hex-view { background:#263238; color:#e0e0e0; border-radius:6px; padding:12px 16px; font-family:monospace; font-size:.8em; line-height:1.6; margin:10px 0; }
+.hex-view .off { color:#78909c; }
+.hex-view .hl { color:#ffcc80; }
+@media(max-width:768px){ .header h1 { font-size:1.4em; } .section { padding:18px 14px; } }
+</style>
+</head>
+<body>
+
+<div class="header">
+<h1>NTP 时间同步模块详解</h1>
+<div class="sub">从零理解：UDP 协议、NTP 报文格式、时间戳转换、ESP8266 二进制数据发送</div>
+<div class="file">Core/Src/ntp.c  +  Core/Inc/ntp.h</div>
+</div>
+
+<nav>
+<ul>
+<li><a href="#overview">模块概述</a></li>
+<li><a href="#protocol">NTP 协议原理</a></li>
+<li><a href="#code">ntp_get_time 逐行拆解</a></li>
+<li><a href="#packet">NTP 报文详解</a></li>
+<li><a href="#format">时间格式化</a></li>
+<li><a href="#bugs">关键问题</a></li>
+</ul>
+</nav>
+
+<div class="container">
+
+<!-- ========== 模块概述 ========== -->
+<div class="section" id="overview">
+<h2>一、模块概述</h2>
+
+<p>NTP（Network Time Protocol）模块负责通过互联网获取准确的 UTC 时间。项目中使用它让 OLED 时间页显示真实的时钟，而不是芯片内部的自由计数。</p>
+
+<h3>1.1 为什么要用 NTP 而不是 HTTP？</h3>
+<table>
+<tr><th>对比</th><th>NTP</th><th>HTTP 获取时间</th></tr>
+<tr><td>协议</td><td>UDP（无连接）</td><td>TCP（三次握手）</td></tr>
+<tr><td>数据量</td><td>48 字节请求 + 48 字节响应</td><td>几百字节 HTTP 头 + 响应体</td></tr>
+<tr><td>交互次数</td><td>1 次交换</td><td>TCP 握手 3 次 + HTTP 请求 1 次 + 响应</td></tr>
+<tr><td>精度</td><td>毫秒级（带小数部分）</td><td>秒级（HTTP Date 头）</td></tr>
+<tr><td>是否需要 API Key</td><td>不需要</td><td>取决于此服务</td></tr>
+</table>
+
+<h3>1.2 函数接口</h3>
+<pre><span class="cm">// ntp.h  — 只有两个函数</span>
+
+<span class="cm">// 从 NTP 服务器获取 Unix 时间戳</span>
+<span class="cm">// 参数: server=服务器域名, timestamp=输出参数</span>
+<span class="cm">// 返回: 0=成功, 负值=失败</span>
+<span class="kw">int</span> <span class="fn">ntp_get_time</span>(<span class="kw">const</span> <span class="kw">char</span>* server, uint32_t* timestamp);
+
+<span class="cm">// 将 Unix 时间戳格式化为 "HH:MM:SS"</span>
+<span class="cm">// 参数: buf=输出缓冲区, timestamp=Unix 秒数（UTC+8 已处理）</span>
+<span class="kw">void</span> <span class="fn">ntp_format_time</span>(<span class="kw">char</span>* buf, uint32_t timestamp);</pre>
+</div>
+
+
+<!-- ========== NTP 协议原理 ========== -->
+<div class="section" id="protocol">
+<h2>二、NTP 协议原理</h2>
+
+<h3>2.1 NTP 是什么？</h3>
+<p>NTP（Network Time Protocol）是互联网上广泛使用的<strong>时间同步协议</strong>。它通过 UDP 协议（端口 123）与时间服务器通信，获取精确的 UTC 时间。</p>
+
+<p>核心思路很简单：</p>
+<ul>
+<li><strong>客户端</strong>发送 48 字节的请求包</li>
+<li><strong>服务器</strong>返回 48 字节的响应包，其中包含精确的时间戳</li>
+<li><strong>客户端</strong>提取时间戳，转换为本地时间</li>
+</ul>
+
+<h3>2.2 NTP vs Unix 时间戳</h3>
+<table>
+<tr><th></th><th>NTP 时间戳</th><th>Unix 时间戳</th></tr>
+<tr><td>起点 (Epoch)</td><td>1900-01-01 00:00:00</td><td>1970-01-01 00:00:00</td></tr>
+<tr><td>单位</td><td>秒（整数）+ 1/2^32 秒（小数）</td><td>秒</td></tr>
+<tr><td>编码</td><td>大端 4 字节（秒部分）</td><td>小端/大端根据平台</td></tr>
+</table>
+
+<p><strong>转换公式</strong>：Unix 时间戳 = NTP 时间戳 - <strong>2208988800</strong></p>
+<p>这个数字是 1900-01-01 到 1970-01-01 之间的总秒数：70 年 × 365.25 天 × 86400 秒 ≈ 2208988800</p>
+
+<h3>2.3 为什么选择 pool.ntp.org？</h3>
+<ul>
+<li><strong>免费</strong>：无需注册、无需 API Key</li>
+<li><strong>分布式</strong>：负载均衡，全球多个服务器</li>
+<li><strong>低延迟</strong>：UDP 直连，无 TCP 握手开销</li>
+<li><strong>标准协议</strong>：所有 NTP 客户端都兼容</li>
+</ul>
+</div>
+
+
+<!-- ========== ntp_get_time 逐行拆解 ========== -->
+<div class="section" id="code">
+<h2>三、ntp_get_time 逐行拆解</h2>
+
+<p>这是整个模块最核心的函数，它通过 ESP8266 的 AT 命令实现 UDP 通信，完成 NTP 协议交互。</p>
+
+<pre><span class="kw">int</span> <span class="fn">ntp_get_time</span>(<span class="kw">const</span> <span class="kw">char</span>* server, uint32_t* timestamp)
+{
+    <span class="kw">char</span> cmd[<span class="num">128</span>];
+    uint8_t resp_buf[<span class="num">256</span>];      <span class="cm">// 原始响应缓冲区</span>
+    uint8_t ntp_req[<span class="num">48</span>];        <span class="cm">// NTP 请求包</span>
+    <span class="kw">int</span> ret;
+
+    <span class="cm">/* 步骤1: 参数检查 */</span>
+    <span class="kw">if</span> (server == NULL || timestamp == NULL) <span class="kw">return</span> -<span class="num">1</span>;
+
+    <span class="cm">/* 步骤2: 清空环形缓冲区，避免旧数据干扰 */</span>
+    esp8266_rx_flush();
+
+    <span class="cm">/* ⭐ 步骤3: 建立 UDP 连接 */</span>
+    snprintf(cmd, <span class="kw">sizeof</span>(cmd),
+        <span class="str">"AT+CIPSTART=\"UDP\",\"%s\",%d,%d,0\r\n"</span>,
+        server, NTP_SERVER_PORT, NTP_SERVER_PORT);
+    <span class="cm">//                          123       123</span>
+    <span class="cm">//                         远程端口   本地端口</span>
+    esp8266_send_at(cmd);
+    ret = esp8266_wait_str(<span class="str">"OK"</span>, <span class="num">5000</span>);
+    <span class="kw">if</span> (ret != <span class="num">0</span>) {
+        esp8266_send_at(<span class="str">"AT+CIPCLOSE\r\n"</span>);
+        <span class="kw">return</span> -<span class="num">2</span>;  <span class="cm">// UDP 连接失败</span>
+    }
+
+    <span class="cm">/* 步骤4: 告诉 ESP8266 要发送 48 字节数据 */</span>
+    snprintf(cmd, <span class="kw">sizeof</span>(cmd), <span class="str">"AT+CIPSEND=%d\r\n"</span>, NTP_PACKET_SIZE);
+    esp8266_send_at(cmd);
+    ret = esp8266_wait_str(<span class="str">">"</span>, <span class="num">5000</span>);
+    <span class="kw">if</span> (ret != <span class="num">0</span>) {
+        esp8266_send_at(<span class="str">"AT+CIPCLOSE\r\n"</span>);
+        <span class="kw">return</span> -<span class="num">3</span>;  <span class="cm">// 没收到 > 提示符</span>
+    }
+
+    <span class="cm">/* ⭐ 步骤5: 发送 NTP 请求包（二进制数据！）*/</span>
+    build_ntp_packet(ntp_req);               <span class="cm">// 构造 48 字节请求</span>
+    esp8266_send_raw((<span class="kw">const</span> <span class="kw">char</span>*)ntp_req, NTP_PACKET_SIZE);
+    <span class="cm">//               ⚠ 用 send_raw 而不是 send_at！</span>
+
+    <span class="cm">/* ⭐ 步骤6: 接收 NTP 响应（10 秒超时）*/</span>
+    {
+        uint32_t start = HAL_GetTick();
+        uint32_t idx = <span class="num">0</span>;
+        <span class="kw">while</span> (HAL_GetTick() - start &lt; NTP_RESP_TIMEOUT)
+        {
+            <span class="kw">char</span> batch[<span class="num">32</span>];
+            <span class="kw">int</span> n = esp8266_rx_read(batch, <span class="kw">sizeof</span>(batch));
+            <span class="kw">for</span> (<span class="kw">int</span> i = <span class="num">0</span>; i &lt; n && idx &lt; <span class="kw">sizeof</span>(resp_buf) - <span class="num">1</span>; i++)
+                resp_buf[idx++] = batch[i];
+            <span class="kw">if</span> (n == <span class="num">0</span>) osDelay(<span class="num">1</span>);
+        }
+    }
+
+    <span class="cm">/* 步骤7: 关闭 UDP 连接 */</span>
+    esp8266_send_at(<span class="str">"AT+CIPCLOSE\r\n"</span>);
+
+    <span class="kw">if</span> (idx == <span class="num">0</span>) <span class="kw">return</span> -<span class="num">4</span>;  <span class="cm">// 没收到任何数据</span>
+
+    <span class="cm">/* ⭐ 步骤8: 在原始响应中解析 +IPD,48: 帧头 */</span>
+    <span class="cm">// 在 resp_buf 中查找 "+IPD," 字符串</span>
+    <span class="kw">char</span>* ipd = NULL;
+    <span class="kw">for</span> (uint32_t i = <span class="num">0</span>; i + <span class="num">5</span> &lt; idx; i++)
+    {
+        <span class="kw">if</span> (resp_buf[i] == <span class="str">'+'</span> && resp_buf[i+<span class="num">1</span>] == <span class="str">'I'</span> &&
+            resp_buf[i+<span class="num">2</span>] == <span class="str">'P'</span> && resp_buf[i+<span class="num">3</span>] == <span class="str">'D'</span> &&
+            resp_buf[i+<span class="num">4</span>] == <span class="str">','</span>)
+        {
+            ipd = (<span class="kw">char</span>*)&resp_buf[i];
+            <span class="kw">break</span>;
+        }
+    }
+    <span class="kw">if</span> (ipd == NULL) <span class="kw">return</span> -<span class="num">5</span>;  <span class="cm">// 没找到 +IPD 头</span>
+
+    <span class="cm">/* 步骤9: 跳过 "+IPD,N:" 帧头，定位到数据体 */</span>
+    <span class="kw">char</span>* p = ipd + <span class="num">5</span>;           <span class="cm">// 跳过 "+IPD,"</span>
+    <span class="kw">while</span> (*p &gt;= <span class="str">'0'</span> && *p &lt;= <span class="str">'9'</span>) p++;  <span class="cm">// 跳过数字长度</span>
+    <span class="kw">if</span> (*p != <span class="str">':'</span>) <span class="kw">return</span> -<span class="num">6</span>;   <span class="cm">// 格式错误</span>
+    p++;  <span class="cm">// 跳过冒号</span>
+
+    <span class="cm">/* 步骤10: 提取 NTP 时间戳（响应字节 40-43）*/</span>
+    <span class="kw">if</span> ((uint32_t)(p + <span class="num">43</span> - (<span class="kw">char</span>*)resp_buf) &gt;= idx)
+        <span class="kw">return</span> -<span class="num">7</span>;  <span class="cm">// 响应太短</span>
+
+    <span class="cm">// 大端 4 字节 → uint32_t</span>
+    uint32_t ntp_time = ((uint32_t)(uint8_t)p[<span class="num">40</span>] &lt;&lt; <span class="num">24</span>) |
+                        ((uint32_t)(uint8_t)p[<span class="num">41</span>] &lt;&lt; <span class="num">16</span>) |
+                        ((uint32_t)(uint8_t)p[<span class="num">42</span>] &lt;&lt; <span class="num">8</span>) |
+                        (uint32_t)(uint8_t)p[<span class="num">43</span>];
+
+    <span class="cm">/* 步骤11: NTP → Unix 转换 */</span>
+    <span class="kw">if</span> (ntp_time &lt; NTP_EPOCH_OFFSET) <span class="kw">return</span> -<span class="num">8</span>;
+    *timestamp = ntp_time - NTP_EPOCH_OFFSET;  <span class="cm">// -2208988800</span>
+
+    <span class="kw">return</span> <span class="num">0</span>;  <span class="cm">// 成功</span>
+}</pre>
+
+<h3>3.1 AT 命令交互全流程</h3>
+
+<div class="step-box">
+<span class="step-num">1</span>
+<code>AT+CIPSTART="UDP","pool.ntp.org",123,123,0</code><br>
+→ 等待 "OK"（5 秒超时）
+</div>
+
+<div class="step-box">
+<span class="step-num">2</span>
+<code>AT+CIPSEND=48</code><br>
+→ 等待 ">"（5 秒超时）
+</div>
+
+<div class="step-box">
+<span class="step-num">3</span>
+发送 48 字节 NTP 请求包（二进制）<br>
+→ ESP8266 转发到 pool.ntp.org:123
+</div>
+
+<div class="step-box">
+<span class="step-num">4</span>
+接收响应：<code>+IPD,48:（48 字节 NTP 响应）</code><br>
+→ 解析 +IPD 帧头 → 提取 byte 40-43
+</div>
+
+<div class="step-box">
+<span class="step-num">5</span>
+<code>AT+CIPCLOSE</code>
+</div>
+
+
+<h3>3.2 为什么用 send_raw 而不是 send_at？</h3>
+
+<div class="callout-red callout">
+<strong>关键问题</strong>：NTP 请求包包含 0x00 字节（48 字节中前 47 字节大部分是 0），而 <code>esp8266_send_at</code> 内部用 <code>strlen</code> 计算长度。strlen 遇到第一个 0x00 就返回 0，所以实际发出去的是空数据！
+</div>
+
+<pre><span class="cm">// ❌ 错误：strlen(ntp_req) 遇到 0x00 返回 0</span>
+esp8266_send_at((<span class="kw">const</span> <span class="kw">char</span>*)ntp_req);  <span class="cm">// 实际发送 0 字节</span>
+
+<span class="cm">// ✅ 正确：明确指定长度 48 字节</span>
+esp8266_send_raw((<span class="kw">const</span> <span class="kw">char</span>*)ntp_req, <span class="num">48</span>);</pre>
+
+<p>这也就是为什么要将 <code>esp8266_send_raw</code> 暴露为公共函数（原 <code>send_cmd</code>/<code>send_data</code> 都是 static 的）。</p>
+</div>
+
+
+<!-- ========== NTP 报文详解 ========== -->
+<div class="section" id="packet">
+<h2>四、NTP 报文详解</h2>
+
+<h3>4.1 构造 NTP 请求</h3>
+<pre><span class="kw">static</span> <span class="kw">void</span> <span class="fn">build_ntp_packet</span>(uint8_t* pkt)
+{
+    memset(pkt, <span class="num">0</span>, NTP_PACKET_SIZE);  <span class="cm">// 全部清零</span>
+    pkt[<span class="num">0</span>] = <span class="num">0x1B</span>;  <span class="cm">// 设置首字节</span>
+}</pre>
+
+<p>NTP 请求包格式（48 字节）：</p>
+
+<div class="hex-view">
+<table style="width:100%;background:transparent;font-size:.9em;">
+<tr style="background:#37474f;">
+  <th>偏移</th><th>大小</th><th>字段</th><th>值</th><th>说明</th>
+</tr>
+<tr><td class="off">0</td><td>1</td><td>LI/VN/Mode</td><td class="hl">0x1B</td><td>VN=3 (版本3), Mode=3 (客户端)</td></tr>
+<tr><td class="off">1</td><td>1</td><td>Stratum</td><td class="off">0x00</td><td>请求包填 0</td></tr>
+<tr><td class="off">2-3</td><td>2</td><td>Poll/Prec</td><td class="off">0x00 0x00</td><td>请求包填 0</td></tr>
+<tr><td class="off">4-39</td><td>36</td><td>保留/根延时/...</td><td class="off">全 0</td><td>保留字段</td></tr>
+<tr><td class="off">40-47</td><td><strong>8</strong></td><td><strong>Transmit Timestamp</strong></td><td class="off">0 (原样发送)</td><td>服务器会复制到 Originate Timestamp</td></tr>
+</table>
+</div>
+
+<h3>4.2 解析 NTP 响应</h3>
+
+<p>服务器返回也是 48 字节。关键字段在<strong>字节 40-43</strong>（Transmit Timestamp 的整数秒部分）：</p>
+
+<div class="hex-view">
+<table style="width:100%;background:transparent;font-size:.9em;">
+<tr style="background:#37474f;">
+  <th>偏移</th><th>大小</th><th>说明</th>
+</tr>
+<tr><td>0-39</td><td>40</td><td>服务器状态信息（我们不需要解析）</td></tr>
+<tr><td class="hl">40-43</td><td><strong>4</strong></td><td><strong>Transmit Timestamp 秒部分（大端）→ 这就是我们要的数据！</strong></td></tr>
+<tr><td>44-47</td><td>4</td><td>小数部分（1/2^32 秒精度，我们不需要）</td></tr>
+</table>
+</div>
+
+<p>4 字节大端整数转 uint32_t 的代码：</p>
+<pre>uint32_t ntp_time = (p[<span class="num">40</span>] &lt;&lt; <span class="num">24</span>) | (p[<span class="num">41</span>] &lt;&lt; <span class="num">16</span>) |
+                    (p[<span class="num">42</span>] &lt;&lt; <span class="num">8</span>)  |  p[<span class="num">43</span>];</pre>
+
+<h3>4.3 时间戳转换实例</h3>
+
+<p>假设服务器返回的 NTP 时间戳 = 3992345678（十六进制 0xEDE5B84E）</p>
+<pre>NTP 时间戳:  <span class="num">3992345678</span> 秒（自 1900-01-01）
+减去偏移:    -<span class="num">2208988800</span>
+Unix 时间戳:  <span class="num">1783356878</span> 秒（自 1970-01-01）</pre>
+
+<p>换算为人类时间：1783356878 → 2026-06-19 18:14:38（UTC+8）</p>
+</div>
+
+
+<!-- ========== 时间格式化 ========== -->
+<div class="section" id="format">
+<h2>五、时间格式化 — ntp_format_time</h2>
+
+<h3>5.1 代码</h3>
+<pre><span class="kw">void</span> <span class="fn">ntp_format_time</span>(<span class="kw">char</span>* buf, uint32_t timestamp)
+{
+    <span class="cm">// 取一天的秒数（取模 86400）</span>
+    uint32_t sec = timestamp % <span class="num">86400</span>;
+
+    <span class="cm">// 计算时/分/秒</span>
+    uint32_t h = sec / <span class="num">3600</span>;            <span class="cm">// 小时（0-23）</span>
+    uint32_t m = (sec % <span class="num">3600</span>) / <span class="num">60</span>;   <span class="cm">// 分钟（0-59）</span>
+    uint32_t s = sec % <span class="num">60</span>;              <span class="cm">// 秒钟（0-59）</span>
+
+    <span class="cm">// 手动格式化 "HH:MM:SS"（不用 sprintf，节省栈空间）</span>
+    buf[<span class="num">0</span>] = <span class="str">'0'</span> + h / <span class="num">10</span>;     <span class="cm">// 十位小时</span>
+    buf[<span class="num">1</span>] = <span class="str">'0'</span> + h % <span class="num">10</span>;     <span class="cm">// 个位小时</span>
+    buf[<span class="num">2</span>] = <span class="str">':'</span>;
+    buf[<span class="num">3</span>] = <span class="str">'0'</span> + m / <span class="num">10</span>;     <span class="cm">// 十位分钟</span>
+    buf[<span class="num">4</span>] = <span class="str">'0'</span> + m % <span class="num">10</span>;     <span class="cm">// 个位分钟</span>
+    buf[<span class="num">5</span>] = <span class="str">':'</span>;
+    buf[<span class="num">6</span>] = <span class="str">'0'</span> + s / <span class="num">10</span>;     <span class="cm">// 十位秒钟</span>
+    buf[<span class="num">7</span>] = <span class="str">'0'</span> + s % <span class="num">10</span>;     <span class="cm">// 个位秒钟</span>
+    buf[<span class="num">8</span>] = <span class="str">'\0'</span>;               <span class="cm">// 结束符</span>
+}</pre>
+
+<h3>5.2 为什么不用 sprintf？</h3>
+<pre><span class="cm">// sprintf 版本（更简洁但更占栈）</span>
+sprintf(buf, <span class="str">"%02d:%02d:%02d"</span>, h, m, s);
+
+<span class="cm">// 手写版本（更安全，不引入 stdio 格式化的栈开销）</span>
+buf[<span class="num">0</span>] = <span class="str">'0'</span> + h/<span class="num">10</span>; ...</pre>
+
+<p>手写版本的好处：</p>
+<ul>
+<li>不依赖 sprintf 的格式化解析器（减少代码体积）</li>
+<li>固定的 9 字节栈使用（sprintf 内部可能有几十字节的临时缓冲区）</li>
+<li>执行速度更快（无格式化解析开销）</li>
+</ul>
+
+<h3>5.3 UTC+8 时区处理</h3>
+<pre><span class="cm">// 在 freertos.c WIFITask 中，NTP 同步后加 8 小时</span>
+system_time = ts + <span class="num">8</span> * <span class="num">3600</span>;   <span class="cm">// UTC → UTC+8（杭州时间）</span>
+time_synced = <span class="num">1</span>;
+
+<span class="cm">// TimeTask 中每秒递增</span>
+<span class="kw">if</span> (time_synced) system_time++;  <span class="cm">// 秒递增</span>
+osDelay(<span class="num">1000</span>);</pre>
+
+<p>时序：NTP 获取的是 UTC 时间，加 8 小时转为北京时间（UTC+8）。之后 TimeTask 每秒 <code>system_time++</code> 维持时间更新。</p>
+</div>
+
+
+<!-- ========== 关键问题 ========== -->
+<div class="section" id="bugs">
+<h2>六、关键问题与经验教训</h2>
+
+<h3>6.1 Bug 汇总</h3>
+
+<table>
+<tr><th>#</th><th>问题</th><th>根因</th><th>修复</th></tr>
+<tr>
+<td><strong>Bug 1</strong></td>
+<td><strong>NTP 首次同步必失败</strong></td>
+<td>TimeTask 的 NTP 和 WIFITask 的 HTTP GET 同时操作 USART1，AT 命令交错</td>
+<td>使用事件组 NTP_ALLOWED_BIT，等 HTTP GET 完成后再开始 NTP</td>
+</tr>
+<tr>
+<td><strong>Bug 2</strong></td>
+<td><strong>NTP 发送 0 字节</strong></td>
+<td>误用 esp8266_send_at（用 strlen 算长度），0x00 导致截断</td>
+<td>改用 esp8266_send_raw 明确指定 48 字节</td>
+</tr>
+<tr>
+<td><strong>Bug 3</strong></td>
+<td><strong>NTP 重试等待 15 秒太长</strong></td>
+<td>osDelay(15000) 让用户等待太久</td>
+<td>改为 osDelay(5000)</td>
+</tr>
+<tr>
+<td><strong>Bug 4</strong></td>
+<td><strong>页面 2 切换后黑屏</strong></td>
+<td>time_synced=0 时更新条件不满足</td>
+<td>last_tick==0 时无条件绘制 "--:--:--"</td>
+</tr>
+</table>
+
+<h3>6.2 Bug 1 详细分析：WIFITask 和 TimeTask 竞争 USART1</h3>
+
+<div class="callout-red callout">
+<strong>现象</strong>：串口输出显示 NTP 和 HTTP 的 AT 命令交错发送，ESP8266 返回 "busy s..."。<br>
+<strong>根因</strong>：两个任务同时向 USART1 写数据，ESP8266 收到乱码。
+</div>
+
+<pre><span class="cm">// 时间轴线 (改前):</span>
+WIFITask:    |--- esp8266_init ---||--- WiFi连接 ---||--- HTTP GET ---------------||
+TimeTask:                           |--- ntp_get_time ---|                           |
+                                    ↑ 两个任务同时用 USART1 → AT 命令交错 → 都失败  ↑
+
+<span class="cm">// 时间轴线 (改后):</span>
+WIFITask:    |--- init ---|--- WiFi ---|-- HTP GET --|-- sleep 30min --|-- HTTP --...
+TimeTask:                               wait bit0     |-- NTP ----------|
+                                                      ↑ WIFITask 休眠时
+                                                        TimeTask 独占 USART1</pre>
+
+<h3>6.3 事件组同步的完整实现</h3>
+
+<pre><span class="cm">// freertos.c</span>
+<span class="mp">#define</span> WIFI_CONNECTED_BIT     (<span class="num">1</span> &lt;&lt; <span class="num">0</span>)  <span class="cm">// bit 0: WiFi 硬件连接成功</span>
+<span class="mp">#define</span> NTP_ALLOWED_BIT        (<span class="num">1</span> &lt;&lt; <span class="num">1</span>)  <span class="cm">// bit 1: USART1 空闲, NTP 可开始</span>
+
+<span class="cm">// WIFITask: WiFi 连上后设置 bit0</span>
+osEventFlagsSet(systemEventGroupHandle, WIFI_CONNECTED_BIT);
+<span class="cm">// ... 完成 HTTP GET 后设置 bit1</span>
+osEventFlagsSet(systemEventGroupHandle, NTP_ALLOWED_BIT);
+
+<span class="cm">// TimeTask: 分两步等待</span>
+osEventFlagsWait(systemEventGroupHandle, WIFI_CONNECTED_BIT, ...);  <span class="cm">// 等WiFi</span>
+osEventFlagsWait(systemEventGroupHandle, NTP_ALLOWED_BIT, ...);    <span class="cm">// 等HTTP完成</span>
+<span class="cm">// 此时 WIFITask 已进入 osDelay(1800000)，USART1 空闲 → 安全 NTP</span></pre>
+
+<h3>6.4 经验教训</h3>
+
+<h4>教训1：RTOS 下共享外设必须互斥</h4>
+<div class="callout-red callout">
+一个 USART1 连接一个 ESP8266，任何时刻只能有一个任务发 AT 命令。FreeRTOS 下必须用同步原语协调访问。<strong>"两个任务同时"在 RTOS 中不是偶然，而是调度的必然。</strong>
+</div>
+
+<h4>教训2：事件组可以做分阶段同步</h4>
+<p>只用 WIFI_CONNECTED_BIT 不够——它只表示"WiFi 连接完成"，不表示 "USART1 空闲"。用两个位分别表示"就绪"和"允许"，可以实现更精细的流程控制。</p>
+
+<h4>教训3：二进制数据不能用字符串函数</h4>
+<p>凡是包含 0x00 的数据包，都不能用 strlen、strcpy 等 C 字符串函数处理。NTP 请求包就是典型的反例——48 字节中有 47 个是 0x00。</p>
+
+<h3>6.5 相关文件清单</h3>
+<table>
+<tr><th>文件</th><th>作用</th></tr>
+<tr><td>Core/Src/ntp.c</td><td>NTP 协议实现（123 行）</td></tr>
+<tr><td>Core/Inc/ntp.h</td><td>函数声明</td></tr>
+<tr><td>Core/Inc/esp8266.h</td><td>提供 send_at/send_raw/wait_str 接口</td></tr>
+<tr><td>Core/Src/freertos.c</td><td>调用 NTP、事件组同步、TimeTask 秒计数</td></tr>
+</table>
+
+</div>
+
+</div>
+
+</body>
+</html>

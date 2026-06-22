@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>模块详解 — 天气数据 JSON 解析</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:'Segoe UI','Microsoft YaHei',sans-serif; background:#f0f2f5; color:#333; line-height:1.7; }
+.header { background:linear-gradient(135deg,#4a148c,#6a1b9a); color:#fff; padding:40px 0 30px; text-align:center; }
+.header h1 { font-size:2em; font-weight:700; }
+.header .sub { margin-top:6px; font-size:.95em; opacity:.85; }
+.header .file { margin-top:10px; font-size:.8em; opacity:.7; }
+nav { background:#6a1b9a; padding:10px 0; position:sticky; top:0; z-index:100; box-shadow:0 2px 8px rgba(0,0,0,.2); }
+nav ul { list-style:none; display:flex; flex-wrap:wrap; justify-content:center; gap:4px; padding:0 20px; }
+nav ul li a { color:#ce93d8; text-decoration:none; padding:5px 12px; border-radius:4px; font-size:.85em; transition:.2s; }
+nav ul li a:hover { background:rgba(255,255,255,.12); color:#fff; }
+.container { max-width:1000px; margin:0 auto; padding:25px 20px; }
+.section { background:#fff; border-radius:10px; margin-bottom:25px; padding:28px 30px; box-shadow:0 1px 4px rgba(0,0,0,.06); }
+.section h2 { font-size:1.4em; color:#4a148c; border-left:4px solid #9c27b0; padding-left:14px; margin-bottom:16px; }
+.section h3 { font-size:1.1em; color:#6a1b9a; margin:18px 0 10px; }
+.section h4 { font-size:.98em; color:#455a64; margin:12px 0 6px; }
+.section p { margin:6px 0; }
+.section ul { margin:6px 0 6px 20px; }
+.section ul li { margin:3px 0; }
+code { font-family:'Cascadia Code','Fira Code','Consolas',monospace; font-size:.9em; }
+pre { background:#1e1e2e; color:#cdd6f4; border-radius:8px; padding:14px 18px; overflow-x:auto; font-size:.8em; line-height:1.5; margin:10px 0; }
+pre .kw { color:#89b4fa; } pre .fn { color:#a6e3a1; } pre .str { color:#fab387; }
+pre .cm { color:#6c7086; } pre .num { color:#f9e2af; } pre .tp { color:#cba6f7; }
+pre .mp { color:#94e2d5; } pre .op { color:#89dceb; }
+pre .err { color:#f38ba8; }
+.tag { display:inline-block; background:#f3e5f5; color:#6a1b9a; border-radius:4px; padding:0 7px; font-size:.76em; font-weight:600; margin-right:3px; }
+.tag-red { background:#ffebee; color:#c62828; }
+.tag-amber { background:#fff8e1; color:#f57f17; }
+.tag-green { background:#e8f5e9; color:#2e7d32; }
+.table-wrap { overflow-x:auto; }
+table { width:100%; border-collapse:collapse; margin:10px 0; font-size:.86em; }
+th { background:#f3e5f5; color:#4a148c; text-align:left; padding:8px 10px; border:1px solid #e1bee7; }
+td { padding:7px 10px; border:1px solid #e0e0e0; }
+tr:nth-child(even) { background:#fafafa; }
+tr:hover { background:#f5f5f5; }
+.callout { background:#fff3e0; border-left:4px solid #ff9800; padding:12px 16px; border-radius:4px; margin:10px 0; font-size:.9em; }
+.callout-green { background:#e8f5e9; border-left:4px solid #4caf50; padding:12px 16px; border-radius:4px; margin:10px 0; font-size:.9em; }
+.callout-red { background:#ffebee; border-left:4px solid #f44336; padding:12px 16px; border-radius:4px; margin:10px 0; font-size:.9em; }
+.callout-purple { background:#f3e5f5; border-left:4px solid #9c27b0; padding:12px 16px; border-radius:4px; margin:10px 0; font-size:.9em; }
+.flow { text-align:center; padding:12px; background:#fafafa; border-radius:6px; margin:8px 0; font-size:.85em; color:#555; }
+.flow .arrow { color:#9c27b0; font-weight:700; }
+.step-box { background:#f5f5f5; border-radius:6px; padding:14px 18px; margin:10px 0; }
+.step-num { display:inline-block; background:#9c27b0; color:#fff; border-radius:50%; width:24px; height:24px; text-align:center; line-height:24px; font-size:.8em; font-weight:700; margin-right:8px; }
+.json-example { background:#263238; color:#e0e0e0; border-radius:6px; padding:12px 16px; font-family:monospace; font-size:.82em; line-height:1.6; margin:10px 0; }
+.json-example .key { color:#80cbc4; }
+.json-example .val { color:#ffe082; }
+.json-example .bra { color:#ef9a9a; }
+@media(max-width:768px){ .header h1 { font-size:1.4em; } .section { padding:18px 14px; } }
+</style>
+</head>
+<body>
+
+<div class="header">
+<h1>天气数据 JSON 解析模块详解</h1>
+<div class="sub">从零理解：手写 JSON 解析器、防御性编程、ASCII 过滤、空指针保护</div>
+<div class="file">Core/Src/weather.c  +  Core/Inc/weather.h</div>
+</div>
+
+<nav>
+<ul>
+<li><a href="#overview">模块概述</a></li>
+<li><a href="#struct">数据结构</a></li>
+<li><a href="#api">API 响应格式</a></li>
+<li><a href="#jsonfind">json_find_value 逐行拆解</a></li>
+<li><a href="#parse">weather_parse_now 完整流程</a></li>
+<li><a href="#sanitize">ASCII 过滤</a></li>
+<li><a href="#bugs">关键问题</a></li>
+</ul>
+</nav>
+
+<div class="container">
+
+<!-- ========== 模块概述 ========== -->
+<div class="section" id="overview">
+<h2>一、模块概述</h2>
+
+<p>weather.c 负责将 ESP8266 获取的 HTTP 响应（JSON 格式）解析为结构化的天气数据。核心只有：</p>
+<ul>
+<li><strong>1 个结构体</strong>：WeatherData_t 用于存储解析结果</li>
+<li><strong>2 个函数</strong>：json_find_value（查找字段）+ weather_parse_now（完整解析）</li>
+<li><strong>1 个辅助函数</strong>：sanitize_to_ascii（过滤中文字符）</li>
+</ul>
+
+<div class="callout-purple callout">
+<strong>核心设计思想</strong>：没有使用 cJSON 等第三方 JSON 库，而是手写了一个极简的 JSON 解析器。原因：（1）STM32F103C8 只有 20KB RAM，cJSON 的动态内存分配会碎片化堆；（2）API 返回格式固定，用 strstr 定位字段效率更高；（3）代码量可控（整个 weather.c 仅 124 行）。
+</div>
+</div>
+
+
+<!-- ========== 数据结构 ========== -->
+<div class="section" id="struct">
+<h2>二、数据结构 — WeatherData_t</h2>
+
+<pre><span class="cm">// weather.h:10-15</span>
+<span class="kw">typedef</span> <span class="kw">struct</span> {
+    <span class="kw">char</span> city[<span class="num">32</span>];       <span class="cm">// 城市名，如 "Hangzhou"</span>
+    <span class="kw">char</span> weather[<span class="num">32</span>];    <span class="cm">// 天气描述，如 "Cloudy"</span>
+    <span class="kw">char</span> temp[<span class="num">8</span>];        <span class="cm">// 温度，如 "27"（不带单位）</span>
+    <span class="kw">char</span> humidity[<span class="num">8</span>];    <span class="cm">// 湿度，如 "65" 或 "--"</span>
+} WeatherData_t;</pre>
+
+<table>
+<tr><th>字段</th><th>最大长度</th><th>数据来源</th><th>说明</th></tr>
+<tr><td>city</td><td>32 字节</td><td>location → name</td><td>国际城市名（英文）</td></tr>
+<tr><td>weather</td><td>32 字节</td><td>now → text</td><td>天气描述（英文）</td></tr>
+<tr><td>temp</td><td>8 字节</td><td>now → temperature</td><td>纯数字字符串</td></tr>
+<tr><td>humidity</td><td>8 字节</td><td>now → humidity</td><td>免费版 API 不返回，始终 "--"</td></tr>
+</table>
+
+<p><strong>为什么都用 char 数组而不是 int？</strong></p>
+<ul>
+<li>JSON 解析直接得到的是字符串（"27" 而不是整数 27）</li>
+<li>OLED 显示需要字符串格式，避免整数转字符串的转换开销</li>
+<li>"--" 这样的占位符只能用字符串表示</li>
+</ul>
+</div>
+
+
+<!-- ========== API 响应格式 ========== -->
+<div class="section" id="api">
+<h2>三、心知天气 API 响应格式</h2>
+
+<h3>3.1 实际返回的 JSON 结构</h3>
+<p>通过串口调试抓取到的真实 API 响应：</p>
+
+<div class="json-example">
+{<br>
+&nbsp;&nbsp;<span class="key">"results"</span>:[<br>
+&nbsp;&nbsp;&nbsp;&nbsp;{<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="key">"location"</span>:{<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="key">"name"</span>:<span class="val">"Hangzhou"</span>,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="key">"country"</span>:<span class="val">"CN"</span>,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="key">"path"</span>:<span class="val">"Hangzhou,Hangzhou,Zhejiang,China"</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;},<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="key">"now"</span>:{<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="key">"text"</span>:<span class="val">"Cloudy"</span>,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="key">"code"</span>:<span class="val">"4"</span>,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="key">"temperature"</span>:<span class="val">"27"</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br>
+&nbsp;&nbsp;&nbsp;&nbsp;}<br>
+&nbsp;&nbsp;]<br>
+}
+</div>
+
+<h3>3.2 解析目标</h3>
+<table>
+<tr><th>JSON 路径</th><th>目标字段</th></tr>
+<tr><td>results → [0] → location → name</td><td>weather.city = "Hangzhou"</td></tr>
+<tr><td>results → [0] → now → text</td><td>weather.weather = "Cloudy"</td></tr>
+<tr><td>results → [0] → now → temperature</td><td>weather.temp = "27"</td></tr>
+<tr><td>results → [0] → now → humidity</td><td>不存在（免费版）→ weather.humidity = "--"</td></tr>
+</table>
+</div>
+
+
+<!-- ========== json_find_value ========== -->
+<div class="section" id="jsonfind">
+<h2>四、json_find_value 函数逐行拆解</h2>
+
+<p>这是整个模块最底层的函数，负责在一个 JSON 片段中搜索指定 key 并提取它的值。</p>
+
+<pre><span class="kw">static</span> <span class="kw">char</span>* <span class="fn">json_find_value</span>(<span class="kw">const</span> <span class="kw">char</span>* json,
+                              <span class="kw">const</span> <span class="kw">char</span>* key,
+                              <span class="kw">char</span>* value, <span class="kw">int</span> value_len)
+{
+    <span class="cm">// 步骤1: 在 JSON 中搜索 key 字符串</span>
+    <span class="kw">char</span>* p = strstr(json, key);
+    <span class="kw">if</span> (p == NULL) <span class="kw">return</span> NULL;     <span class="cm">// 找不到 key</span>
+
+    <span class="cm">// 步骤2: 跳过分隔符，找到冒号</span>
+    <span class="cm">// 输入: ..."key":"value"...  → p 指向 key</span>
+    p = strchr(p, <span class="str">':'</span>);            <span class="cm">// 找冒号</span>
+    <span class="kw">if</span> (p == NULL) <span class="kw">return</span> NULL;
+    p++;                             <span class="cm">// 跳过冒号</span>
+
+    <span class="cm">// 步骤3: 跳过空格和制表符</span>
+    <span class="kw">while</span> (*p == <span class="str">' '</span> || *p == <span class="str">'\t'</span>) p++;
+
+    <span class="cm">// 步骤4: 判断值类型</span>
+    <span class="kw">if</span> (*p == <span class="str">'"'</span>)                 <span class="cm">// 字符串值: "Cloudy"</span>
+    {
+        p++;                         <span class="cm">// 跳过开头引号</span>
+        <span class="kw">char</span>* end = strchr(p, <span class="str">'"'</span>);  <span class="cm">// 找结尾引号</span>
+        <span class="kw">if</span> (end == NULL) <span class="kw">return</span> NULL;
+
+        <span class="kw">int</span> len = end - p;          <span class="cm">// 计算字符长度</span>
+        <span class="kw">if</span> (len &gt; value_len - <span class="num">1</span>)     <span class="cm">// 防止缓冲区溢出</span>
+            len = value_len - <span class="num">1</span>;
+        strncpy(value, p, len);      <span class="cm">// 复制字符串</span>
+        value[len] = <span class="str">'\0'</span>;          <span class="cm">// 手动加结束符</span>
+        <span class="kw">return</span> value;
+    }
+    <span class="kw">else</span> <span class="kw">if</span> (*p == <span class="str">'{'</span> || *p == <span class="str">'['</span>)  <span class="cm">// 对象/数组 → 不支持</span>
+    {
+        <span class="kw">return</span> NULL;
+    }
+    <span class="kw">else</span>                             <span class="cm">// 数字值: 27  (不带引号)</span>
+    {
+        <span class="kw">char</span>* end = p;
+        <span class="kw">while</span> (*end != <span class="str">','</span> && *end != <span class="str">'}'</span> &&
+               *end != <span class="str">'\n'</span> && *end != <span class="str">'\r'</span>)
+            end++;                    <span class="cm">// 找到值的结尾</span>
+
+        <span class="kw">int</span> len = end - p;
+        <span class="kw">if</span> (len &gt; value_len - <span class="num">1</span>) len = value_len - <span class="num">1</span>;
+        strncpy(value, p, len);
+        value[len] = <span class="str">'\0'</span>;
+        <span class="kw">return</span> value;
+    }
+}</pre>
+
+<h3>4.1 处理示例</h3>
+
+<table>
+<tr><th>输入</th><th>key</th><th>输出</th></tr>
+<tr><td><code>"name":"Hangzhou"</code></td><td>"name"</td><td>"Hangzhou"（走字符串分支）</td></tr>
+<tr><td><code>"temperature":"27"</code></td><td>"temperature"</td><td>"27"（走字符串分支）</td></tr>
+<tr><td><code>"humidity":"65"</code></td><td>"humidity"</td><td>"65"（走字符串分支）</td></tr>
+<tr><td><code>"now":{...}</code></td><td>"now"</td><td>NULL（走对象分支，不支持提取对象值）</td></tr>
+</table>
+
+<h3>4.2 关键边界处理</h3>
+<ul>
+<li><strong>strstr 的模糊匹配</strong>：搜索 "name" 可能会匹配到 "name_cn"。但心知天气 API 返回的 key 名称是固定的，不会混淆。如果担心可以加 <code>strstr(p, "\"name\"")</code> 精确匹配。</li>
+<li><strong>缓冲区溢出保护</strong>：如果值长度超过 value_len，截断处理（第 22、39 行的 len 检查）</li>
+<li><strong>strncpy 不自动加 '\0'</strong>：如果 len == value_len，strncpy 不会写结束符，需要手动加（第 24、41 行）</li>
+</ul>
+
+<div class="callout callout-red">
+<strong>曾踩过的坑</strong>：strstr 在搜索小 key 时可能匹配到大 key 的子串。例：在 JSON 中搜索 "now" 时，如果前一个字段名包含 "now"（如 "know"），会误匹配。心知天气 API 的字段名中没有这种命名冲突，所以这个方法可行。如果遇到更复杂的 JSON，还是应该用 cJSON 等专业库。
+</div>
+</div>
+
+
+<!-- ========== weather_parse_now ========== -->
+<div class="section" id="parse">
+<h2>五、weather_parse_now 完整流程</h2>
+
+<p>这个函数是解析的入口，它将 HTTP 响应字符串按 JSON 层次结构逐个字段提取。</p>
+
+<pre><span class="kw">int</span> <span class="fn">weather_parse_now</span>(<span class="kw">const</span> <span class="kw">char</span>* json_response, WeatherData_t* weather)
+{
+    <span class="cm">/* 阶段1: 参数安全检查 */</span>
+    <span class="kw">if</span> (json_response == NULL || weather == NULL)
+        <span class="kw">return</span> -<span class="num">1</span>;
+
+    memset(weather, <span class="num">0</span>, <span class="kw">sizeof</span>(WeatherData_t));  <span class="cm">// 初始化为0</span>
+
+    <span class="cm">/* 阶段2: 定位 JSON 层次结构 */</span>
+    <span class="kw">const</span> <span class="kw">char</span>* results_start = strstr(json_response, <span class="str">"results"</span>);
+    <span class="kw">if</span> (results_start == NULL) <span class="kw">return</span> -<span class="num">2</span>;
+
+    <span class="kw">const</span> <span class="kw">char</span>* first_brace = strchr(results_start, <span class="str">'['</span>);   <span class="cm">// 到 results 数组</span>
+    <span class="kw">if</span> (first_brace == NULL) <span class="kw">return</span> -<span class="num">3</span>;
+
+    <span class="kw">const</span> <span class="kw">char</span>* first_obj = strchr(first_brace, <span class="str">'{'</span>);       <span class="cm">// 到第一个对象</span>
+    <span class="kw">if</span> (first_obj == NULL) <span class="kw">return</span> -<span class="num">4</span>;
+
+    <span class="cm">/* 阶段3: 提取 location.name → city */</span>
+    <span class="kw">const</span> <span class="kw">char</span>* location_start = strstr(first_obj, <span class="str">"location"</span>);
+    <span class="kw">if</span> (location_start != NULL)
+        json_find_value(location_start, <span class="str">"name"</span>, weather->city, <span class="kw">sizeof</span>(weather->city));
+
+    <span class="cm">/* 阶段4: 提取 now.text/temperature/humidity */</span>
+    <span class="kw">const</span> <span class="kw">char</span>* now_start = strstr(first_obj, <span class="str">"now"</span>);
+    <span class="kw">if</span> (now_start != NULL)
+    {
+        json_find_value(now_start, <span class="str">"text"</span>, weather->weather, <span class="kw">sizeof</span>(weather->weather));
+        json_find_value(now_start, <span class="str">"temperature"</span>, weather->temp, <span class="kw">sizeof</span>(weather->temp));
+        json_find_value(now_start, <span class="str">"humidity"</span>, weather->humidity, <span class="kw">sizeof</span>(weather->humidity));
+    }
+
+    <span class="cm">/* 阶段5: 数据清洗和 Fallback */</span>
+    sanitize_to_ascii(weather->city);
+    sanitize_to_ascii(weather->weather);
+    sanitize_to_ascii(weather->temp);
+    sanitize_to_ascii(weather->humidity);
+
+    <span class="kw">if</span> (strlen(weather->city) == <span class="num">0</span>)     strcpy(weather->city, <span class="str">"Unknown"</span>);
+    <span class="kw">if</span> (strlen(weather->weather) == <span class="num">0</span>)  strcpy(weather->weather, <span class="str">"Unknown"</span>);
+    <span class="kw">if</span> (strlen(weather->temp) == <span class="num">0</span>)     strcpy(weather->temp, <span class="str">"--"</span>);
+    <span class="kw">if</span> (strlen(weather->humidity) == <span class="num">0</span>) strcpy(weather->humidity, <span class="str">"--"</span>);
+
+    <span class="kw">return</span> <span class="num">0</span>;  <span class="cm">// 成功</span>
+}</pre>
+
+<h3>5.1 逐阶段解析图解</h3>
+
+<div class="step-box">
+<span class="step-num">1</span> <strong>找 "results"</strong> —— 从原始 JSON 中定位 results 数组的起始位置<br>
+<code>strstr(json, "results") → 指向 "...results":[{...}]" 中 "r" 的位置</code>
+</div>
+
+<div class="step-box">
+<span class="step-num">2</span> <strong>找 '['</strong> —— 从 results_start 开始找数组开始的 '[' 字符<br>
+<code>strchr(results_start, '[') → 指向 "[{...}]" 中 '['</code>
+</div>
+
+<div class="step-box">
+<span class="step-num">3</span> <strong>找 '{'</strong> —— 从 first_brace 开始找第一个对象的 '{'<br>
+<code>strchr(first_brace, '{') → 指向 "{...}" 中 '{'</code>
+</div>
+
+<div class="step-box">
+<span class="step-num">4</span> <strong>找 "location"</strong> → 调用 json_find_value 提取 name</code>
+</div>
+
+<div class="step-box">
+<span class="step-num">5</span> <strong>找 "now"</strong> → 依次提取 text / temperature / humidity</code>
+</div>
+
+<h3>5.2 为什么用 char* 指针缩小搜索范围？</h3>
+
+<p>当定位到 <code>first_obj</code>（指向第一个 <code>{</code>）后，后面的 <code>strstr(first_obj, "location")</code> 只在 <code>{</code> 之后搜索。这相当于"以当前对象为根"做搜索，避免了匹配到前面无关内容。虽然 strstr 是全字符串搜索，但因为作用范围缩小了，可以安全地提取字段。</p>
+
+<div class="callout-purple callout">
+<strong>更深刻的思考</strong>：为什么不用 <code>strstr(json, "location")</code>（从开头搜）？因为 JSON 中可能有多个 location 字段（比如天气预报里，每一天都有 location），从 first_obj 开始搜确保找到的是当前对象的 location。
+</div>
+</div>
+
+
+<!-- ========== ASCII 过滤 ========== -->
+<div class="section" id="sanitize">
+<h2>六、ASCII 过滤 — sanitize_to_ascii</h2>
+
+<h3>6.1 为什么需要这个函数？</h3>
+<p>心知天气 API 可以根据 <code>language=en</code> 参数返回英文结果。但如果 API 配置有误或 fallback 到中文，OLED 显示中文会变成空白——因为 oled_show_char 只支持 ASCII 字符（0x20~0x7E），遇到 >= 0x80 的 UTF-8 中文字节直接跳过。</p>
+
+<p>更隐蔽的问题是：一个中文字符占 3 个 UTF-8 字节，每个字节都 >= 0x80。如果全部被过滤，字符串长度变为 0，之前的代码不会触发 Fallback 显示 "Unknown"，因为 <code>strlen("深圳") = 6 > 0</code>。</p>
+
+<h3>6.2 代码</h3>
+<pre><span class="kw">static</span> <span class="kw">void</span> <span class="fn">sanitize_to_ascii</span>(<span class="kw">char</span>* str)
+{
+    <span class="kw">char</span>* r = str;     <span class="cm">// 读指针</span>
+    <span class="kw">char</span>* w = str;     <span class="cm">// 写指针（原地操作）</span>
+    <span class="kw">while</span> (*r)
+    {
+        <span class="kw">if</span> ((<span class="kw">unsigned</span> <span class="kw">char</span>)*r &lt; <span class="num">0x80</span>)  <span class="cm">// ASCII 字符保留</span>
+            *w++ = *r;
+        <span class="cm">// >= 0x80 的非 ASCII 字符跳过（不写）</span>
+        r++;
+    }
+    *w = <span class="str">'\0'</span>;  <span class="cm">// 新结束符</span>
+}</pre>
+
+<h3>6.3 举例</h3>
+<table>
+<tr><th>输入</th><th>过滤后</th><th>strlen 过滤前</th><th>strlen 过滤后</th></tr>
+<tr><td>"Hangzhou"</td><td>"Hangzhou"</td><td>8</td><td>8</td></tr>
+<tr><td>"深圳"（UTF-8: E6 B7 B1 E5 9C B3）</td><td>""（空）</td><td>6</td><td>0 ← 触发 Fallback！</td></tr>
+<tr><td>"Cloudy 多云"</td><td>"Cloudy "</td><td>11</td><td>7</td></tr>
+</table>
+
+<div class="callout-green callout">
+<strong>与原代码配合</strong>：过滤后如果为空字符串，后面的 Fallback 逻辑将其替换为 "Unknown" 或 "--"，确保 OLED 始终有内容显示。
+</div>
+</div>
+
+
+<!-- ========== 关键问题 ========== -->
+<div class="section" id="bugs">
+<h2>七、关键问题与经验教训</h2>
+
+<h3>7.1 曾发生的 Bug 汇总</h3>
+
+<table>
+<tr><th>#</th><th>问题</th><th>根因</th><th>修复</th></tr>
+<tr>
+<td><strong>Bug 1</strong></td>
+<td><strong>HardFault (死机黑屏)</strong></td>
+<td>strchr 返回 NULL 后未检查，直接传给下一个 strchr，触发空指针解引用</td>
+<td>添加 NULL 检查，返回不同错误码 -3/-4</td>
+</tr>
+<tr>
+<td><strong>Bug 2</strong></td>
+<td><strong>湿度始终 "--"</strong></td>
+<td>心知天气免费版 API 不返回 humidity 字段</td>
+<td>非代码 bug，fallback 显示 "--" 是预期行为</td>
+</tr>
+<tr>
+<td><strong>Bug 3</strong></td>
+<td><strong>中文字符显示空白</strong></td>
+<td>API 返回中文时 OLED 无法显示</td>
+<td>添加 sanitize_to_ascii + fallback 默认值</td>
+</tr>
+<tr>
+<td><strong>Bug 4</strong></td>
+<td><strong>湿度解析在 NULL 检查外</strong></td>
+<td>humidity 提取代码写在 if(now_start) 外面</td>
+<td>移入 if 块内</td>
+</tr>
+</table>
+
+<h3>7.2 Bug 1 详细分析：first_brace 空指针</h3>
+
+<div class="callout-red callout">
+<strong>现象</strong>：OLED 显示 "Weather OK!" 后突然黑屏，全黑无任何像素。<br>
+<strong>实际原因</strong>：HardFault 导致系统复位，OLED 重新初始化（清屏）。
+</div>
+
+<pre><span class="cm">// 改前（weather.c 早期版本）</span>
+<span class="kw">const</span> <span class="kw">char</span>* first_brace = strchr(results_start, <span class="str">'['</span>);
+<span class="kw">const</span> <span class="kw">char</span>* first_obj = strchr(first_brace, <span class="str">'{'</span>);   <span class="cm">// ← first_brace 可能是 NULL！</span>
+<span class="kw">if</span> (first_obj == NULL) <span class="kw">return</span> -<span class="num">3</span>;
+
+<span class="cm">// 改后</span>
+<span class="kw">const</span> <span class="kw">char</span>* first_brace = strchr(results_start, <span class="str">'['</span>);
+<span class="kw">if</span> (first_brace == NULL) <span class="kw">return</span> -<span class="num">3</span>;  <span class="cm">// ← 先检查 first_brace</span>
+<span class="kw">const</span> <span class="kw">char</span>* first_obj = strchr(first_brace, <span class="str">'{'</span>);
+<span class="kw">if</span> (first_obj == NULL) <span class="kw">return</span> -<span class="num">4</span>;  <span class="cm">// ← 再检查 first_obj，返回不同错误码</span></pre>
+
+<p><strong>为什么 results 可能不是数组？</strong> 心知天气 API v3 的 results 通常是数组 <code>"results":[{...}]</code>，但在 API 异常时可能返回 <code>"results":{...}</code>（对象而非数组），或者干脆错误信息中根本没 results。</p>
+
+<h3>7.3 错误码对照表</h3>
+<table>
+<tr><th>返回值</th><th>含义</th><th>可能原因</th></tr>
+<tr><td>-1</td><td>参数为空指针</td><td>调用时传递了 NULL</td></tr>
+<tr><td>-2</td><td>找不到 "results" 键</td><td>API 响应格式异常</td></tr>
+<tr><td>-3</td><td>results 后找不到 '['</td><td>results 不是数组格式</td></tr>
+<tr><td>-4</td><td>数组后找不到 '{'</td><td>JSON 为空数组 []</td></tr>
+<tr><td>0</td><td>解析成功</td><td>正常</td></tr>
+</table>
+
+<h3>7.4 经验教训总结</h3>
+
+<h4>教训1：NULL 指针不止检查参数</h4>
+<div class="callout callout-red">
+strstr/strchr 的返回值也是潜在的 NULL 源！对外部数据（网络响应）的解析要假设格式可能不符合预期。每步解析都做 NULL 检查是嵌入式开发的铁律。
+</div>
+
+<h4>教训2：外部数据不可信</h4>
+<p>API 返回的数据可能因网络截断、SSL 解密错误、API 服务升级、key 过期等原因不符合预期。每条解析路径都要有防御性编程保护。</p>
+
+<h4>教训3：不要信任第三方 API 的"免费版"</h4>
+<p>心知天气免费版不返回湿度字段。这不是 bug，但设计时需要提前确认 API 文档。更稳妥的做法是设计时假设"所有字段都可能缺失"，并用 Fallback 值兜底。</p>
+
+<h4>教训4：不同的错误码帮助调试</h4>
+<p>使用 -1、-2、-3、-4 四个不同错误码，比统一返回 -1 更有价值。在 OLED 上显示 "Err=-3" 可以直接定位到"没找到 '['" 的问题。</p>
+
+<h3>7.5 相关文件清单</h3>
+<table>
+<tr><th>文件</th><th>作用</th></tr>
+<tr><td>Core/Src/weather.c</td><td>JSON 解析实现（124 行）</td></tr>
+<tr><td>Core/Inc/weather.h</td><td>WeatherData_t 结构体和函数声明</td></tr>
+<tr><td>Core/Src/freertos.c</td><td>调用 weather_parse_now（WeatherTask 中）</td></tr>
+</table>
+
+</div>
+
+</div>
+
+</body>
+</html>

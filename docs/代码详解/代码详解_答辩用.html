@@ -1,0 +1,753 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>STM32 物联网天气站 — 代码详解</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family: 'Segoe UI','Microsoft YaHei',sans-serif; background:#f0f2f5; color:#333; line-height:1.7; }
+.header { background:linear-gradient(135deg,#1a237e,#0d47a1); color:#fff; padding:50px 0 40px; text-align:center; }
+.header h1 { font-size:2.2em; font-weight:700; letter-spacing:2px; }
+.header .sub { margin-top:8px; font-size:1em; opacity:.85; }
+.header .info { margin-top:15px; font-size:.85em; opacity:.7; }
+nav { background:#283593; padding:12px 0; position:sticky; top:0; z-index:100; box-shadow:0 2px 8px rgba(0,0,0,.2); }
+nav ul { list-style:none; display:flex; flex-wrap:wrap; justify-content:center; gap:6px; padding:0 20px; }
+nav ul li a { color:#c5cae9; text-decoration:none; padding:6px 14px; border-radius:4px; font-size:.88em; transition:.2s; }
+nav ul li a:hover { background:rgba(255,255,255,.15); color:#fff; }
+.container { max-width:1100px; margin:0 auto; padding:30px 20px; }
+.section { background:#fff; border-radius:10px; margin-bottom:28px; padding:30px 35px; box-shadow:0 1px 4px rgba(0,0,0,.06); }
+.section h2 { font-size:1.5em; color:#1a237e; border-left:4px solid #3f51b5; padding-left:14px; margin-bottom:18px; }
+.section h3 { font-size:1.15em; color:#283593; margin:20px 0 10px; }
+.section h4 { font-size:1em; color:#455a64; margin:14px 0 6px; }
+.section p { margin:8px 0; }
+.section ul { margin:8px 0 8px 22px; }
+.section ul li { margin:4px 0; }
+code { font-family:'Cascadia Code','Fira Code','Consolas',monospace; font-size:.9em; }
+pre { background:#1e1e2e; color:#cdd6f4; border-radius:8px; padding:16px 20px; overflow-x:auto; font-size:.82em; line-height:1.55; margin:12px 0; position:relative; }
+pre .kw { color:#89b4fa; } pre .fn { color:#a6e3a1; } pre .str { color:#fab387; }
+pre .cm { color:#6c7086; } pre .num { color:#f9e2af; } pre .tp { color:#cba6f7; }
+pre .mp { color:#94e2d5; } pre .op { color:#89dceb; }
+.tag { display:inline-block; background:#e3f2fd; color:#1565c0; border-radius:4px; padding:0 8px; font-size:.78em; font-weight:600; margin-right:4px; }
+.tag-red { background:#ffebee; color:#c62828; }
+.tag-green { background:#e8f5e9; color:#2e7d32; }
+.tag-amber { background:#fff8e1; color:#f57f17; }
+.arch-box { display:flex; flex-wrap:wrap; gap:20px; margin:16px 0; }
+.arch-item { flex:1; min-width:200px; background:#f5f5f5; border-radius:8px; padding:16px; text-align:center; }
+.arch-item .icon { font-size:2em; margin-bottom:6px; }
+.arch-item .name { font-weight:600; color:#1a237e; }
+.arch-item .desc { font-size:.85em; color:#666; margin-top:4px; }
+.flow { text-align:center; padding:14px; background:#fafafa; border-radius:8px; margin:10px 0; font-size:.88em; color:#555; }
+.flow span { display:inline-block; margin:0 6px; }
+.flow .arrow { color:#3f51b5; font-weight:700; }
+.file-badge { display:inline-block; background:#263238; color:#b0bec5; border-radius:3px; padding:0 8px; font-family:monospace; font-size:.8em; margin-right:4px; }
+table { width:100%; border-collapse:collapse; margin:12px 0; font-size:.88em; }
+th { background:#e8eaf6; color:#1a237e; text-align:left; padding:10px 12px; border:1px solid #c5cae9; }
+td { padding:8px 12px; border:1px solid #e0e0e0; }
+tr:nth-child(even) { background:#fafafa; }
+tr:hover { background:#f5f5f5; }
+@media(max-width:768px) { .header h1 { font-size:1.5em; } .section { padding:20px 16px; } nav ul li a { padding:4px 10px; font-size:.8em; } }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>STM32 物联网天气站</h1>
+  <div class="sub">基于 FreeRTOS + ESP8266 + SSD1306 的嵌入式天气预报系统</div>
+  <div class="info">MCU: STM32F103C8T6 (Cortex-M3) &nbsp;|&nbsp; IDE: Keil MDK-ARM v5 &nbsp;|&nbsp; RTOS: FreeRTOS (CMSIS-RTOS2)</div>
+</div>
+
+<nav>
+  <ul>
+    <li><a href="#overview">项目概述</a></li>
+    <li><a href="#arch">系统架构</a></li>
+    <li><a href="#tasks">任务分析</a></li>
+    <li><a href="#main">入口 main.c</a></li>
+    <li><a href="#freertos">FreeRTOS 调度</a></li>
+    <li><a href="#esp8266">ESP8266 驱动</a></li>
+    <li><a href="#weather">天气解析</a></li>
+    <li><a href="#oled">OLED 显示</a></li>
+    <li><a href="#ntp">NTP 时间同步</a></li>
+    <li><a href="#bugs">Bug 修复记录</a></li>
+    <li><a href="#summary">总结</a></li>
+  </ul>
+</nav>
+
+<div class="container">
+
+<!-- ========== 项目概述 ========== -->
+<div class="section" id="overview">
+<h2>一、项目概述</h2>
+
+<h3>1.1 项目目标</h3>
+<p>本项目基于 STM32F103C8T6（Blue Pill）微控制器，通过 ESP8266 WiFi 模块连接互联网，从<strong>心知天气 API</strong> 获取实时天气数据，在 0.96 寸 SSD1306 OLED 显示屏上展示天气信息，并支持按键切换页面显示时间。</p>
+
+<h3>1.2 硬件组成</h3>
+<div class="arch-box">
+  <div class="arch-item"><div class="icon">&#x1F4E1;</div><div class="name">STM32F103C8T6</div><div class="desc">主控 MCU, 72MHz, 20KB RAM, 64KB Flash</div></div>
+  <div class="arch-item"><div class="icon">&#x1F4F6;</div><div class="name">ESP8266-01S</div><div class="desc">WiFi 模块, USART1 通信, 115200 baud</div></div>
+  <div class="arch-item"><div class="icon">&#x1F5A5;</div><div class="name">SSD1306 OLED</div><div class="desc">0.96 寸, 128x64, I2C 接口, 地址 0x78</div></div>
+  <div class="arch-item"><div class="icon">&#x2328;</div><div class="name">按键 (PB8)</div><div class="desc">上拉输入, 用于切换显示页面</div></div>
+</div>
+
+<h3>1.3 软件栈</h3>
+<table>
+  <tr><th>层次</th><th>组件</th><th>说明</th></tr>
+  <tr><td>应用层</td><td>WIFITask / WeatherTask / OledTask / KeyTask / TimeTask</td><td>5 个 FreeRTOS 任务</td></tr>
+  <tr><td>中间层</td><td>ESP8266 驱动 / 天气 JSON 解析 / NTP 协议</td><td>模块化封装</td></tr>
+  <tr><td>硬件抽象层</td><td>STM32 HAL 库 (GPIO, I2C, USART, TIM)</td><td>CubeMX 自动生成</td></tr>
+  <tr><td>操作系统</td><td>FreeRTOS V10.3.1 (heap_4)</td><td>CMSIS-RTOS2 封装</td></tr>
+</table>
+</div>
+
+
+<!-- ========== 系统架构 ========== -->
+<div class="section" id="arch">
+<h2>二、系统架构</h2>
+
+<h3>2.1 系统流程图</h3>
+<div class="flow">
+<span>系统上电</span><span class="arrow">→</span>
+<span>HAL 初始化</span><span class="arrow">→</span>
+<span>外设初始化 (GPIO/I2C/USART)</span><span class="arrow">→</span>
+<span>OLED 初始化</span><span class="arrow">→</span>
+<span>osKernelStart()</span><span class="arrow">→</span>
+<span>多任务并发</span>
+</div>
+
+<h3>2.2 数据流</h3>
+<div class="flow">
+<span>ESP8266</span><span class="arrow">→(USART1 RX 中断)</span>
+<span>环形缓冲区</span><span class="arrow">←(WIFITask 读取)</span>
+<span>HTTP GET → http_response[1024]</span><span class="arrow">→</span>
+<span>信号量 weatherSem</span><span class="arrow">→</span>
+<span>WeatherTask 解析</span><span class="arrow">→</span>
+<span>current_weather 结构体</span><span class="arrow">→</span>
+<span>OledTask 刷新 OLED</span>
+</div>
+
+<h3>2.3 同步机制</h3>
+<table>
+  <tr><th>同步对象</th><th>类型</th><th>用途</th></tr>
+  <tr><td>weatherSem</td><td>信号量 (初始计数 0)</td><td>WIFITask → WeatherTask, 通知有数据可解析</td></tr>
+  <tr><td>oledMutex</td><td>互斥锁</td><td>保护 OLED (I2C) 多任务竞争</td></tr>
+  <tr><td>systemEventGroup</td><td>事件组</td><td>WIFI_CONNECTED_BIT(bit0) + NTP_ALLOWED_BIT(bit1)</td></tr>
+</table>
+</div>
+
+
+<!-- ========== 任务分析 ========== -->
+<div class="section" id="tasks">
+<h2>三、FreeRTOS 任务分析</h2>
+
+<table>
+  <tr><th>任务名</th><th>优先级</th><th>栈大小</th><th>功能</th></tr>
+  <tr><td>WIFITask</td><td>Normal</td><td>384×4=1536B</td><td>ESP8266 初始化 → WiFi 连接 → NTP 同步 → 每 30 分钟 HTTP GET</td></tr>
+  <tr><td>WeatherTask</td><td>Low</td><td>256×4=1024B</td><td>等待信号量 → JSON 解析 → 更新 weather_updated</td></tr>
+  <tr><td>OledTask</td><td>Low</td><td>160×4=640B</td><td>双页面渲染: 天气页/时间页, 检测 weather_updated</td></tr>
+  <tr><td>KeyTask</td><td>Low</td><td>128×4=512B</td><td>轮询 PB8, 下降沿检测 + 消抖, 切换页面</td></tr>
+  <tr><td>TimeTask</td><td>Low</td><td>192×4=768B</td><td>等 WiFi 就绪 → 每秒 system_time++</td></tr>
+</table>
+
+<h3>3.1 任务优先级设计意图</h3>
+<p>WIFitask 优先级最高（Normal），因为它负责网络通信，需要及时响应 ESP8266 数据避免缓冲区溢出。其他 4 个任务均为 Low 优先级，因为它们可以容忍一定延迟。</p>
+
+<h3>3.2 关键设计决策</h3>
+<ul>
+  <li><strong>信号量初始值 0</strong>（不是 1）：确保 WeatherTask 在 WIFITask 首次产生数据前不会尝试解析空缓冲区</li>
+  <li><strong>OledTask 统一管理显示</strong>：WeatherTask 只负责解析数据设置标志，不直接操作 OLED</li>
+  <li><strong>事件组分阶段同步</strong>：WiFi 连接 → HTTP GET 完成 → NTP 开始，三个步骤依次执行避免 USART1 竞争</li>
+</ul>
+</div>
+
+
+<!-- ========== main.c ========== -->
+<div class="section" id="main">
+<h2>四、入口 main.c 详解</h2>
+
+<h3>4.1 启动流程</h3>
+<pre><span class="kw">int</span> <span class="fn">main</span>(<span class="kw">void</span>)
+{
+    HAL_Init();
+    SystemClock_Config();   <span class="cm">// HSE 8MHz → PLL ×9 → 72MHz</span>
+
+    MX_GPIO_Init();         <span class="cm">// PB8 按键输入</span>
+    MX_I2C1_Init();         <span class="cm">// I2C 400kHz (OLED)</span>
+    MX_USART1_UART_Init();  <span class="cm">// USART1 115200 8N1 (ESP8266)</span>
+
+    oled_init();
+    oled_clear();
+    oled_refresh_gram();    <span class="cm">// 开机清屏</span>
+
+    osKernelInitialize();
+    MX_FREERTOS_Init();     <span class="cm">// 创建任务/信号量/互斥锁/事件组</span>
+    osKernelStart();        <span class="cm">// 启动调度器，不再返回</span>
+}
+</pre>
+
+<h3>4.2 要点说明</h3>
+<ul>
+  <li>HSE 外部晶振 8MHz，PLL 倍频至 72MHz</li>
+  <li>系统时钟源：TIM4 提供 HAL_IncTick（代替 SysTick，避免与 FreeRTOS 冲突）</li>
+  <li><span class="file-badge">Core/Inc/main.h</span> 包含了 stm32f1xx_hal.h 和通用类型定义</li>
+</ul>
+</div>
+
+
+<!-- ========== freertos.c ========== -->
+<div class="section" id="freertos">
+<h2>五、FreeRTOS 调度 (freertos.c)</h2>
+
+<p><span class="file-badge">Core/Src/freertos.c</span> 是项目的核心调度文件，包含全部 5 个任务的实现。</p>
+
+<h3>5.1 WIFITask — 网络通信任务</h3>
+<pre><span class="kw">void</span> <span class="fn">StartWIFITask</span>(<span class="kw">void</span> *argument)
+{
+    <span class="cm">// 阶段1: ESP8266 硬件初始化</span>
+    <span class="kw">while</span> (esp8266_init() != 0) {
+        <span class="cm">// 显示"ESP8266 init fail"</span>
+        <span class="cm">// 重试5次后卡死</span>
+    }
+
+    <span class="cm">// 阶段2: WiFi 连接</span>
+    <span class="kw">while</span> (esp8266_connect_wifi(<span class="str">"YOUR_WIFI_SSID"</span>, <span class="str">"YOUR_WIFI_PASSWORD"</span>) != 0) {
+        <span class="cm">// 重试10次后卡死</span>
+    }
+
+    <span class="cm">// 阶段3: 通知 TimeTask 可以开始 NTP</span>
+    osEventFlagsSet(systemEventGroupHandle, WIFI_CONNECTED_BIT);
+
+    <span class="cm">// 阶段4: 本任务内完成 NTP 同步（不依赖 TimeTask）</span>
+    <span class="kw">while</span> (ntp_get_time(<span class="str">"pool.ntp.org"</span>, &ts) != 0) osDelay(1000);
+    system_time = ts + 8*3600;  <span class="cm">// UTC+8</span>
+    time_synced = 1;
+
+    <span class="cm">// 阶段5: 主循环 — 每30分钟获取天气</span>
+    <span class="kw">for</span> (;;) {
+        esp8266_http_get(<span class="str">"api.seniverse.com"</span>, 80, path,
+                         http_response, <span class="kw">sizeof</span>(http_response));
+        <span class="kw">if</span> (成功) osSemaphoreRelease(weatherSemHandle);
+        <span class="kw">else</span> <span class="cm">/* 显示错误码 */</span>;
+        osDelay(1800000);  <span class="cm">// 30分钟</span>
+    }
+}</pre>
+
+<h4>设计要点</h4>
+<ul>
+  <li>NTP 同步在 WIFITask 中完成（不在 TimeTask），减少跨任务通信和时序依赖</li>
+  <li>ESP8266 初始化失败后重试 5 次，WiFi 连接失败后重试 10 次，均卡死防止空跑</li>
+  <li>所有 OLED 操作前后均使用 <code>osMutexAcquire/Release</code> 保护</li>
+</ul>
+
+<h3>5.2 WeatherTask — 天气解析任务</h3>
+<pre><span class="kw">void</span> <span class="fn">StartWeatherTask</span>(<span class="kw">void</span> *argument)
+{
+    <span class="kw">for</span> (;;) {
+        <span class="cm">// 等待信号量，超时5秒</span>
+        <span class="kw">if</span> (osSemaphoreAcquire(weatherSemHandle, 5000) == osOK) {
+            <span class="kw">int</span> ret = weather_parse_now(http_response, &parsed);
+            <span class="kw">if</span> (ret == 0) {
+                current_weather = parsed;   <span class="cm">// 结构体拷贝</span>
+                weather_updated = 1;        <span class="cm">// volatile 标志</span>
+            }
+        }
+        osDelay(100);
+    }
+}</pre>
+
+<h4>关键设计</h4>
+<ul>
+  <li><code>http_response</code> 是全局缓冲区，WIFITask 写入后 WeatherTask 读取 — 通过信号量保证"写后读"顺序</li>
+  <li><code>weather_updated</code> 使用 volatile 修饰，确保 OledTask 能正确读到最新值</li>
+  <li>超时 5 秒防止信号量意外丢失时任务永久阻塞</li>
+</ul>
+
+<h3>5.3 OledTask — 显示管理任务</h3>
+<pre><span class="kw">void</span> <span class="fn">StartOledTask</span>(<span class="kw">void</span> *argument)
+{
+    <span class="kw">for</span> (;;) {
+        <span class="kw">if</span> (current_page != disp_page) {  <span class="cm">// 检测页面切换</span>
+            disp_page = current_page; last_tick = 0;
+        }
+
+        <span class="kw">if</span> (disp_page == 0) {  <span class="cm">// 天气页</span>
+            <span class="kw">if</span> (weather_updated || ...) {
+                weather_updated = 0;
+                oled_clear_buffer();          <span class="cm">// 只清缓冲区</span>
+                <span class="cm">// 居中显示: 城市, 天气描述, 大字温度</span>
+                oled_refresh_gram();          <span class="cm">// 一次性送显</span>
+            }
+        } <span class="kw">else</span> {  <span class="cm">// 时间页</span>
+            <span class="kw">if</span> (last_tick == 0 || HAL_GetTick()-last_tick >= 1000) {
+                last_tick = HAL_GetTick();
+                oled_clear_buffer();
+                oled_show_big_string(0, 16, time_buf);  <span class="cm">// 大字显示</span>
+                oled_refresh_gram();
+            }
+        }
+        osDelay(200);
+    }
+}</pre>
+
+<h4>双页面渲染策略</h4>
+<table>
+  <tr><th>页面 0 (天气)</th><th>页面 1 (时间)</th></tr>
+  <tr><td>行0: 城市名 (居中)</td><td rowspan="4" style="vertical-align:middle;text-align:center;font-size:1.2em;">大字时间<br>HH:MM:SS<br>(2x 缩放字体)</td></tr>
+  <tr><td>行1: 天气描述 (居中)</td></tr>
+  <tr><td>行2-3: 温度 (大字 2x) (居中)</td></tr>
+  <tr><td>行4: 湿度 (未显示, 免费版 API 不返回)</td></tr>
+</table>
+
+<h3>5.4 KeyTask — 按键检测</h3>
+<pre><span class="kw">void</span> <span class="fn">StartKeyTask</span>(<span class="kw">void</span> *argument)
+{
+    <span class="kw">for</span> (;;) {
+        <span class="kw">if</span> (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_8) == GPIO_PIN_RESET) {
+            osDelay(50);  <span class="cm">// 消抖</span>
+            <span class="kw">if</span> (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_8) == GPIO_PIN_RESET) {
+                current_page ^= 1;          <span class="cm">// 切换页面</span>
+                <span class="kw">while</span> (...) osDelay(10);  <span class="cm">// 等待释放</span>
+            }
+        }
+        osDelay(50);
+    }
+}</pre>
+
+<h4>说明</h4>
+<ul>
+  <li>PB8 配置为上拉输入，按键接 GND，按下为低电平</li>
+  <li>50ms 软件消抖，检测下降沿</li>
+  <li>等待释放后再返回，避免一次按下多次触发</li>
+</ul>
+
+<h3>5.5 TimeTask — 时间维护</h3>
+<pre><span class="kw">void</span> <span class="fn">StartTimeTask</span>(<span class="kw">void</span> *argument)
+{
+    <span class="cm">// 等待 WiFi 就绪后才开始</span>
+    osEventFlagsWait(systemEventGroupHandle, WIFI_CONNECTED_BIT, ...);
+
+    <span class="kw">for</span> (;;) {
+        <span class="kw">if</span> (time_synced) system_time++;  <span class="cm">// 秒计数器</span>
+        osDelay(1000);
+    }
+}</pre>
+
+<h4>设计简化</h4>
+<ul>
+  <li>TimeTask 只做秒计数，NTP 同步逻辑由 WIFITask 完成</li>
+  <li><code>time_synced=0</code> 时 OLED 显示 "--:--:--"</li>
+</ul>
+</div>
+
+
+<!-- ========== ESP8266 ========== -->
+<div class="section" id="esp8266">
+<h2>六、ESP8266 驱动详解</h2>
+<p><span class="file-badge">Core/Src/esp8266.c</span> + <span class="file-badge">Core/Inc/esp8266.h</span></p>
+
+<h3>6.1 环形缓冲区 — 中断接收</h3>
+<pre><span class="kw">static</span> <span class="kw">char</span> esp8266_ring_buf[<span class="num">512</span>];
+<span class="kw">static</span> <span class="kw">volatile</span> uint16_t ring_head = <span class="num">0</span>;
+<span class="kw">static</span> uint16_t ring_tail = <span class="num">0</span>;
+
+<span class="cm">// 中断回调: ISR 写入 (生产者)</span>
+<span class="kw">void</span> <span class="fn">esp8266_rx_callback</span>(uint8_t data)
+{
+    uint16_t next = (ring_head + <span class="num">1</span>) % ESP8266_RING_BUF_SIZE;
+    <span class="kw">if</span> (next != ring_tail)          <span class="cm">// 检查环形缓冲区是否满</span>
+        esp8266_ring_buf[ring_head++] = data;
+}
+
+<span class="cm">// 任务读取 (消费者) — 支持批量读取</span>
+<span class="kw">int</span> <span class="fn">esp8266_rx_read</span>(<span class="kw">char</span> *buf, uint32_t len)
+{
+    <span class="kw">int</span> i = <span class="num">0</span>;
+    <span class="kw">while</span> (i &lt; len && ring_tail != ring_head) {
+        buf[i++] = esp8266_ring_buf[ring_tail++];
+        ring_tail %= ESP8266_RING_BUF_SIZE;
+    }
+    <span class="kw">return</span> i;
+}</pre>
+
+<h4>关键改进</h4>
+<ul>
+  <li><strong>512 字节环形缓冲区</strong>：解决 +IPD 突发数据 410+ 字节的溢出问题</li>
+  <li><strong>批量读取</strong>：每轮最多读 64 字节（而非逐字节），读取速率 64 字节/ms 远大于 115200 baud 的 11.5 字节/ms</li>
+  <li><strong>无数据时 osDelay(1)</strong>：避免忙等待浪费 CPU</li>
+</ul>
+
+<h3>6.2 HTTP GET 实现</h3>
+<pre><span class="kw">int</span> <span class="fn">esp8266_http_get</span>(<span class="str">"api.seniverse.com"</span>, <span class="num">80</span>, path, response, resp_len)
+{
+    <span class="cm">// 1. AT+CIPSTART="TCP","api.seniverse.com",80</span>
+    <span class="cm">// 2. 等待 OK (10s 超时)</span>
+    <span class="cm">// 3. AT+CIPSEND=长度</span>
+    <span class="cm">// 4. 等待 ">" 提示符 (5s 超时)</span>
+    <span class="cm">// 5. 发送 HTTP GET 请求</span>
+    <span class="cm">// 6. 批量读取 15s, 每轮最多 64 字节</span>
+    <span class="cm">// 7. 事后数据清理:</span>
+    <span class="cm">//    a) 找第一个 '{' 或 '['</span>
+    <span class="cm">//    b) 原地过滤 +IPD,数字: 帧头</span>
+    <span class="cm">//    c) memmove 到缓冲区开头</span>
+}</pre>
+
+<h4>数据清理算法（核心）</h4>
+<pre><span class="cm">// 跳过 +IPD,N: 帧头的原地过滤算法</span>
+<span class="kw">char</span> *r = json, *w = json;
+<span class="kw">while</span> (*r) {
+    <span class="kw">if</span> (strncmp(r, <span class="str">"+IPD,"</span>, <span class="num">5</span>) == <span class="num">0</span>) {
+        r += <span class="num">5</span>;
+        <span class="kw">while</span> (*r >= <span class="str">'0'</span> &amp;&amp; *r &lt;= <span class="str">'9'</span>) r++;  <span class="cm">// 跳过长数字</span>
+        <span class="kw">if</span> (*r == <span class="str">':'</span>) r++;  <span class="cm">// 跳过冒号</span>
+        <span class="kw">continue</span>;  <span class="cm">// 丢弃整个 +IPD,N: 帧头</span>
+    }
+    *w++ = *r++;
+}
+*w = <span class="str">'\0'</span>;
+memmove(response, json, w - json + <span class="num">1</span>);</pre>
+
+<h4>算法原理</h4>
+<ul>
+  <li>r（读指针）始终 >= w（写指针），不会互相覆盖</li>
+  <li>遇到 "+IPD," 后跳过数字和冒号，不复制到输出</li>
+  <li>其余字符正常复制</li>
+  <li>最后 memmove 将过滤后的数据移到缓冲区头部</li>
+</ul>
+
+<h3>6.3 AT 命令响应检测</h3>
+<pre><span class="cm">// esp8266_wait_response: 智能字符串匹配</span>
+<span class="kw">while</span> (HAL_GetTick() - start &lt; timeout) {
+    <span class="kw">if</span> (esp8266_rx_available()) {
+        <span class="kw">char</span> ch; esp8266_rx_read(&ch, <span class="num">1</span>);
+        <span class="kw">if</span> (ch == <span class="str">'\n'</span>) {
+            <span class="cm">// 整行检测: 匹配 expected_str 或 ERROR/FAIL</span>
+        } <span class="kw">else</span> <span class="kw">if</span> (ch != <span class="str">'\r'</span>) {
+            line_buf[idx++] = ch; line_buf[idx] = <span class="str">'\0'</span>;
+            <span class="cm">// 非行尾也要检查（用于匹配 ">" 提示符）</span>
+            <span class="kw">if</span> (strstr(line_buf, expected_str) != NULL) <span class="kw">return</span> <span class="num">0</span>;
+        }
+    }
+    osDelay(<span class="num">1</span>);  <span class="cm">// 让出 CPU</span>
+}</pre>
+
+</div>
+
+
+<!-- ========== weather.c ========== -->
+<div class="section" id="weather">
+<h2>七、天气数据解析 (weather.c)</h2>
+<p><span class="file-badge">Core/Src/weather.c</span> + <span class="file-badge">Core/Inc/weather.h</span></p>
+
+<h3>7.1 WeatherData_t 结构体</h3>
+<pre><span class="kw">typedef</span> <span class="kw">struct</span> {
+    <span class="kw">char</span> city[<span class="num">32</span>];      <span class="cm">// 城市名 (如 "Hangzhou")</span>
+    <span class="kw">char</span> weather[<span class="num">32</span>];   <span class="cm">// 天气描述 (如 "Cloudy")</span>
+    <span class="kw">char</span> temp[<span class="num">8</span>];       <span class="cm">// 温度 (如 "27")</span>
+    <span class="kw">char</span> humidity[<span class="num">8</span>];   <span class="cm">// 湿度 (始终 "--", 免费版不提供)</span>
+} WeatherData_t;</pre>
+
+<h3>7.2 JSON 解析函数 — weather_parse_now</h3>
+<pre><span class="kw">int</span> <span class="fn">weather_parse_now</span>(<span class="kw">const</span> <span class="kw">char</span>* json_response, WeatherData_t* weather)
+{
+    <span class="cm">// 空指针检查</span>
+    <span class="kw">if</span> (!json_response || !weather) <span class="kw">return</span> -<span class="num">1</span>;
+
+    <span class="cm">// 定位 JSON 结构: results → [...] → {...}</span>
+    results_start = strstr(json, <span class="str">"results"</span>);     <span class="cm">// 搜索 "results" 键</span>
+    first_brace  = strchr(results_start, <span class="str">'['</span>);   <span class="cm">// 找到数组开始 [</span>
+    first_obj    = strchr(first_brace, <span class="str">'{'</span>);     <span class="cm">// 找到第一个对象 {</span>
+
+    <span class="cm">// 解析字段</span>
+    <span class="kw">if</span> (location_start)
+        json_find_value(location_start, <span class="str">"name"</span>, weather->city, ...);
+    <span class="kw">if</span> (now_start) {
+        json_find_value(now_start, <span class="str">"text"</span>, weather->weather, ...);
+        json_find_value(now_start, <span class="str">"temperature"</span>, weather->temp, ...);
+        json_find_value(now_start, <span class="str">"humidity"</span>, weather->humidity, ...);
+    }
+
+    <span class="cm">// 过滤非 ASCII 字符 + 空字符串 Fallback</span>
+    sanitize_to_ascii(...);
+    <span class="kw">if</span> (strlen(city) == <span class="num">0</span>) strcpy(city, <span class="str">"Unknown"</span>);
+    <span class="kw">if</span> (strlen(temp) == <span class="num">0</span>) strcpy(temp, <span class="str">"--"</span>);
+}</pre>
+
+<h3>7.3 json_find_value 实现细节</h3>
+<pre><span class="kw">static</span> <span class="kw">char</span>* <span class="fn">json_find_value</span>(<span class="kw">const</span> <span class="kw">char</span>* json, <span class="kw">const</span> <span class="kw">char</span>* key, <span class="kw">char</span>* value, <span class="kw">int</span> value_len)
+{
+    p = strstr(json, key);          <span class="cm">// 找键名</span>
+    p = strchr(p, <span class="str">':'</span>);            <span class="cm">// 跳过冒号</span>
+    p++;  <span class="kw">while</span> (*p == ' ') p++;    <span class="cm">// 跳过空格</span>
+
+    <span class="kw">if</span> (*p == <span class="str">'"'</span>) {               <span class="cm">// 字符串值: "value"</span>
+        p++;  end = strchr(p, <span class="str">'"'</span>);
+        strncpy(value, p, end - p);
+    } <span class="kw">else</span> {                       <span class="cm">// 数字值: 123</span>
+        <span class="kw">while</span> (*end != <span class="str">','</span> &amp;&amp; *end != <span class="str">'}'</span>) end++;
+        strncpy(value, p, end - p);
+    }
+}</pre>
+
+<h4>解析流程</h4>
+<div class="flow">
+<span>HTTP 响应</span><span class="arrow">→</span>
+<span>找 "results"</span><span class="arrow">→</span>
+<span>找 '['</span><span class="arrow">→</span>
+<span>找 '{'</span><span class="arrow">→</span>
+<span>找 "location" → name</span><span class="arrow">→</span>
+<span>找 "now" → text/temperature/humidity</span><span class="arrow">→</span>
+<span>ASCII 过滤 + Fallback</span>
+</div>
+
+<h3>7.4 防御性编程</h3>
+<ul>
+  <li>每个 strstr/strchr 返回值都检查 NULL，返回不同的错误码 (-1~-4)</li>
+  <li>sanitize_to_ascii 过滤非 ASCII 字符（中文字符 UTF-8 多字节）</li>
+  <li>所有字段均有默认值 Fallback（"Unknown" / "--"）</li>
+  <li>从修改报告可知，曾发生过 first_brace 为 NULL 导致的 HardFault</li>
+</ul>
+</div>
+
+
+<!-- ========== oled.c ========== -->
+<div class="section" id="oled">
+<h2>八、OLED 显示驱动 (oled.c / oled.h)</h2>
+
+<h3>8.1 I2C 通信基础</h3>
+<pre><span class="cm">// oled.h 关键宏定义</span>
+<span class="mp">#define</span> OLED_I2C_ADDR    <span class="num">0x78</span>    <span class="cm">// SSD1306 I2C 地址 (7bit 左移1位)</span>
+<span class="mp">#define</span> OLED_CMD         <span class="num">0</span>       <span class="cm">// 控制字节: 下一个字节是命令</span>
+<span class="mp">#define</span> OLED_DATA        <span class="num">0x40</span>    <span class="cm">// 控制字节: 下一个字节是数据</span>
+
+<span class="cm">// I2C 写字节函数</span>
+<span class="kw">static</span> <span class="kw">void</span> <span class="fn">oled_wr_byte</span>(uint8_t data, uint8_t cmd)
+{
+    uint8_t buf[<span class="num">2</span>];
+    buf[<span class="num">0</span>] = cmd ? OLED_DATA : OLED_CMD;  <span class="cm">// cmd=0→0x00, cmd=1→0x40</span>
+    buf[<span class="num">1</span>] = data;
+    HAL_I2C_Master_Transmit(&hi2c1, OLED_I2C_ADDR, buf, <span class="num">2</span>, <span class="num">100</span>);
+}</pre>
+
+<h4>重要：OLED_DATA 为什么是 0x40？</h4>
+<p>SSD1306 驱动芯片的 I2C 协议中，每个数据包的第一个字节是控制字节。bit6 = D/C# 位：0 表示后续是命令，1 表示后续是数据。因此数据控制字节必须是 0x40（bit6=1），而不是简单的逻辑值 1。早期版本将此宏误定义为 1，导致所有显示数据被芯片解释为命令，产生乱码。</p>
+
+<h3>8.2 双缓冲显示</h3>
+<pre><span class="kw">static</span> uint8_t oled_gram[<span class="num">128</span>][<span class="num">8</span>];  <span class="cm">// 1KB 显存: 128列 × 8页</span>
+
+<span class="cm">// 只清缓冲区 — 解决闪烁问题</span>
+<span class="kw">void</span> <span class="fn">oled_clear_buffer</span>(<span class="kw">void</span>)
+{
+    <span class="kw">for</span> (i=<span class="num">0</span>; i&lt;<span class="num">8</span>; i++)
+        <span class="kw">for</span> (n=<span class="num">0</span>; n&lt;<span class="num">128</span>; n++)
+            oled_gram[n][i] = <span class="num">0x00</span>;
+}
+
+<span class="cm">// 将整个 GRAM 刷到 OLED</span>
+<span class="kw">void</span> <span class="fn">oled_refresh_gram</span>(<span class="kw">void</span>)
+{
+    <span class="kw">for</span> (i=<span class="num">0</span>; i&lt;<span class="num">8</span>; i++) {
+        oled_wr_byte(<span class="num">0xb0</span>+i, OLED_CMD);  <span class="cm">// 设置页地址</span>
+        oled_wr_byte(<span class="num">0x00</span>, OLED_CMD);    <span class="cm">// 列低4位</span>
+        oled_wr_byte(<span class="num">0x10</span>, OLED_CMD);    <span class="cm">// 列高4位</span>
+        <span class="kw">for</span> (n=<span class="num">0</span>; n&lt;<span class="num">128</span>; n++)
+            oled_wr_byte(oled_gram[n][i], OLED_DATA);  <span class="cm">// 128字节/页</span>
+    }
+}</pre>
+
+<h4>双缓冲策略</h4>
+<ul>
+  <li>先在内存中的 oled_gram 绘制</li>
+  <li>绘制完成调用 oled_refresh_gram 一次性送显</li>
+  <li>清屏时只清缓冲区不清显存（oled_clear_buffer），避免了屏幕闪烁</li>
+</ul>
+
+<h3>8.3 大字显示函数（2x 缩放）</h3>
+<pre><span class="kw">void</span> <span class="fn">oled_show_big_char</span>(uint8_t x, uint8_t y, <span class="kw">char</span> c)
+{
+    uint8_t *pfont = (uint8_t *)oled_asc2_1608[c - <span class="str">' '</span>];
+
+    <span class="kw">for</span> (t = <span class="num">0</span>; t &lt; <span class="num">16</span>; t++) {
+        temp = pfont[t];
+        <span class="kw">for</span> (t1 = <span class="num">0</span>; t1 &lt; <span class="num">8</span>; t1++) {
+            <span class="kw">if</span> (temp &amp; <span class="num">0x80</span>) {
+                <span class="cm">// 每个像素点放大为 2×2 方块</span>
+                oled_draw_point(x, y, <span class="num">1</span>);
+                oled_draw_point(x+<span class="num">1</span>, y, <span class="num">1</span>);
+                oled_draw_point(x, y+<span class="num">1</span>, <span class="num">1</span>);
+                oled_draw_point(x+<span class="num">1</span>, y+<span class="num">1</span>, <span class="num">1</span>);
+            }
+            temp &lt;&lt;= <span class="num">1</span>;
+            y += <span class="num">2</span>;  <span class="cm">// 垂直步长 2</span>
+        }
+        x += <span class="num">2</span>;  <span class="cm">// 水平步长 2</span>
+    }
+}</pre>
+
+<h4>原理</h4>
+<ul>
+  <li>从标准 8×16 字库 oled_asc2_1608 读取字符像素</li>
+  <li>每个原始像素点扩展为 2×2 像素块</li>
+  <li>最终每个大字占 16×32 像素，一行可显示 8 个大字</li>
+</ul>
+
+<h3>8.4 字库风格</h3>
+<p>使用<strong>正点原子 ATK-OLED</strong> 标准 8×16 ASCII 字库（95 个字符：0x20~0x7E），包含完整的字母大小写、数字和符号。</p>
+</div>
+
+
+<!-- ========== NTP ========== -->
+<div class="section" id="ntp">
+<h2>九、NTP 时间同步 (ntp.c)</h2>
+
+<h3>9.1 NTP 协议实现</h3>
+<pre><span class="kw">int</span> <span class="fn">ntp_get_time</span>(<span class="str">"pool.ntp.org"</span>, &timestamp)
+{
+    <span class="cm">// 1. UDP 连接: AT+CIPSTART="UDP","pool.ntp.org",123,123,0</span>
+    <span class="cm">// 2. AT+CIPSEND=48</span>
+    <span class="cm">// 3. 发送 48 字节 NTP 请求包 (首字节 0x1B, 其余 0)</span>
+    <span class="cm">// 4. 批量读取 +IPD,48: 响应 (10s 超时)</span>
+    <span class="cm">// 5. 解析 +IPD,48: 帧头, 提取 byte 40-43</span>
+
+    <span class="cm">// 大端 4 字节 → NTP 时间戳</span>
+    uint32_t ntp_time = (p[<span class="num">40</span>] &lt;&lt; <span class="num">24</span>) | (p[<span class="num">41</span>] &lt;&lt; <span class="num">16</span>) |
+                        (p[<span class="num">42</span>] &lt;&lt; <span class="num">8</span>)  |  p[<span class="num">43</span>];
+
+    <span class="cm">// NTP → Unix: 减去 1900→1970 的秒差</span>
+    *timestamp = ntp_time - <span class="num">2208988800UL</span>;
+}</pre>
+
+<h3>9.2 NTP 协议细节</h3>
+<table>
+  <tr><th>字段</th><th>偏移</th><th>说明</th></tr>
+  <tr><td>LI/VN/Mode</td><td>byte 0</td><td>0x1B = VN=3 (版本3) + Mode=3 (客户端)</td></tr>
+  <tr><td>Stratum</td><td>byte 1</td><td>请求包填 0</td></tr>
+  <tr><td>Poll/Prec</td><td>byte 2-3</td><td>请求包填 0</td></tr>
+  <tr><td>保留字段</td><td>byte 4-39</td><td>全 0</td></tr>
+  <tr><td>Transmit Timestamp</td><td>byte 40-47</td><td>服务器填写, 40-43 是秒部分（大端）</td></tr>
+</table>
+
+<h3>9.3 时间格式化</h3>
+<pre><span class="kw">void</span> <span class="fn">ntp_format_time</span>(<span class="kw">char</span>* buf, uint32_t timestamp)
+{
+    uint32_t sec = timestamp % <span class="num">86400</span>;      <span class="cm">// 一天秒数</span>
+    h = sec / <span class="num">3600</span>;  m = (sec % <span class="num">3600</span>) / <span class="num">60</span>;  s = sec % <span class="num">60</span>;
+    sprintf(buf, <span class="str">"%02d:%02d:%02d"</span>, h, m, s);  <span class="cm">// HH:MM:SS</span>
+}</pre>
+
+<h4>注意事项</h4>
+<ul>
+  <li>NTP 请求包含 0x00 字节（二进制数据），必须用 <code>esp8266_send_raw</code> 而非 <code>esp8266_send_at</code>（strlen 会在第一个 0x00 截断）</li>
+  <li>时区固定 UTC+8（杭州），在 WIFITask 中加 8 小时</li>
+  <li>NTP 使用 UDP 协议比 HTTP 获取时间更高效（48 字节 vs 数百字节）</li>
+</ul>
+</div>
+
+
+<!-- ========== Bugs ========== -->
+<div class="section" id="bugs">
+<h2>十、Bug 修复记录（重点）</h2>
+
+<h3>10.1 OLED 显示乱码 — OLED_DATA 宏定义错误</h3>
+<p><span class="tag tag-red">I2C 协议</span><span class="tag">SSD1306</span></p>
+<p><strong>根因</strong>：<code>#define OLED_DATA 1</code>，正确的 SSD1306 I2C 数据控制字节应为 <code>0x40</code>。</p>
+<p><strong>修复</strong>：改为 <code>#define OLED_DATA 0x40</code>（<span class="file-badge">oled.h:13</span>）</p>
+
+<h3>10.2 RAM 溢出 — .bss 段超 20KB</h3>
+<p><span class="tag tag-red">内存优化</span><span class="tag">FreeRTOS</span></p>
+<p><strong>根因</strong>：FreeRTOS heap_4 的 ucHeap[configTOTAL_HEAP_SIZE] 在 .bss 段中，之前设为 16KB 导致 .bss 超 20KB。</p>
+<p><strong>修复</strong>：</p>
+<ul>
+  <li>configTOTAL_HEAP_SIZE: 16KB → 8KB</li>
+  <li>http_response: 2048 → 1024</li>
+  <li>ESP8266 环形缓冲区: 512 → 256（后又调回 512）</li>
+  <li>各任务栈缩减</li>
+</ul>
+
+<h3>10.3 HardFault — first_brace 空指针</h3>
+<p><span class="tag tag-red">空指针</span><span class="tag">JSON 解析</span></p>
+<p><strong>根因</strong>：<code>strchr(results_start, '[')</code> 返回 NULL 后未检查，直接传给下一个 <code>strchr</code>。</p>
+<p><strong>修复</strong>：添加 NULL 检查并返回不同错误码（<span class="file-badge">weather.c:76-85</span>）</p>
+<pre><span class="cm">// 改前: 直接使用 first_brace 不检查</span>
+<span class="kw">const char</span>* first_brace = strchr(results_start, <span class="str">'['</span>);
+<span class="kw">const char</span>* first_obj = strchr(first_brace, <span class="str">'{'</span>);  <span class="cm">// ← CRASH if NULL</span>
+
+<span class="cm">// 改后: 逐级检查</span>
+<span class="kw">if</span> (first_brace == NULL) <span class="kw">return</span> -<span class="num">3</span>;
+<span class="kw">const char</span>* first_obj = strchr(first_brace, <span class="str">'{'</span>);
+<span class="kw">if</span> (first_obj == NULL) <span class="kw">return</span> -<span class="num">4</span>;</pre>
+
+<h3>10.4 USART1 竞争 — WIFITask 与 TimeTask 冲突</h3>
+<p><span class="tag tag-red">RTOS 同步</span><span class="tag">事件组</span></p>
+<p><strong>根因</strong>：WIFITask 的 HTTP GET 和 TimeTask 的 NTP 同时向 ESP8266 发 AT 命令，数据在 USART1 上交错，ESP8266 收到乱码返回 "busy"。</p>
+<p><strong>修复</strong>：使用事件组分阶段同步（<span class="file-badge">freertos.c</span>）</p>
+<pre><span class="cm">// TimeTask 分两步等待</span>
+osEventFlagsWait(systemEventGroupHandle, WIFI_CONNECTED_BIT, ...);  <span class="cm">// 等WiFi</span>
+osEventFlagsWait(systemEventGroupHandle, NTP_ALLOWED_BIT, ...);    <span class="cm">">// 等HTTP完成</span>
+
+<span class="cm">// WIFITask HTTP GET 完成后释放</span>
+osEventFlagsSet(systemEventGroupHandle, NTP_ALLOWED_BIT);</pre>
+
+<h3>10.5 环形缓冲区溢出 — +IPD 数据截断</h3>
+<p><span class="tag tag-red">缓冲区</span><span class="tag">突发数据</span></p>
+<p><strong>根因</strong>：ESP8266 以 115200 baud 突发 410+ 字节，但逐字节读取仅 1 字节/ms 远低于到达速率 11.5 字节/ms，256 字节缓冲区迅速填满丢包。</p>
+<p><strong>修复</strong>：</p>
+<ul>
+  <li>环形缓冲区 256 → 512</li>
+  <li>批量读取：每轮最多 64 字节，读取速率 64 &gt; 11.5 字节/ms</li>
+  <li>无数据时才 osDelay(1)</li>
+</ul>
+
+<h3>10.6 +IPD 分帧污染 JSON 数据</h3>
+<p><span class="tag tag-red">数据后处理</span><span class="tag">ESP8266</span></p>
+<p><strong>根因</strong>：HTTP 大响应被 ESP8266 拆成多个 +IPD,N: 帧，前一帧 JSON 末尾和后一帧 "+IPD,N:" 帧头混在缓冲区中。</p>
+<p><strong>修复</strong>：先收集全部原始数据，再通过原地扫描过滤 +IPD,N: 帧头。</p>
+
+<h3>10.7 OLED 闪烁 — 清屏送显策略</h3>
+<p><span class="tag tag-green">优化</span><span class="tag">双缓冲</span></p>
+<p><strong>根因</strong>：<code>oled_clear()</code> 清缓冲区后立即送显（屏幕变白），再画新内容二次送显。</p>
+<p><strong>修复</strong>：新增 <code>oled_clear_buffer()</code> 只清缓冲区不送显，绘制完成后一次 <code>oled_refresh_gram()</code>。</p>
+</div>
+
+
+<!-- ========== Summary ========== -->
+<div class="section" id="summary">
+<h2>十一、总结</h2>
+
+<h3>11.1 系统能力</h3>
+<table>
+  <tr><th>功能</th><th>当前状态</th></tr>
+  <tr><td>ESP8266 WiFi 连接</td><td><span class="tag tag-green">✓ 支持</span> 自动重试, 10次失败则卡死</td></tr>
+  <tr><td>心知天气 API 获取+解析</td><td><span class="tag tag-green">✓ 支持</span> 每30分钟刷新, JSON 解析含防御性编程</td></tr>
+  <tr><td>NTP 时间同步</td><td><span class="tag tag-green">✓ 支持</span> 4次重试, 失败显示 "--:--:--"</td></tr>
+  <tr><td>OLED 双页面显示</td><td><span class="tag tag-green">✓ 支持</span> 天气页/时间页, 按键切换</td></tr>
+  <tr><td>2x 大字显示</td><td><span class="tag tag-green">✓ 支持</span> 温度和时间的双倍放大显示</td></tr>
+</table>
+
+<h3>11.2 关键技术点</h3>
+<ul>
+  <li><strong>FreeRTOS 多任务</strong>：5 个任务 + 信号量/互斥锁/事件组三种同步原语</li>
+  <li><strong>中断驱动 UART</strong>：环形缓冲区 + 批量读取，解决高速数据流问题</li>
+  <li><strong>串行外设竞争</strong>：使用事件组分阶段同步解决 USART1 多任务冲突</li>
+  <li><strong>有限 RAM 优化</strong>：20KB 内精细分配 BSS/Heap/Stack</li>
+  <li><strong>防御性编程</strong>：逐级 NULL 检查、ASCII 过滤、默认值 Fallback</li>
+</ul>
+
+<h3>11.3 未来改进方向</h3>
+<ul>
+  <li>WIFI 断线自动检测与重连</li>
+  <li>多个城市支持（按键切换）</li>
+  <li>USART1 加 Mutex 从根本上防止竞争</li>
+  <li>OledWIFITask 错误信息通过队列传给 OledTask 统一管理</li>
+</ul>
+
+<h3>11.4 最终编译结果</h3>
+<pre>Program Size: Code=<span class="num">29644</span> RO-data=<span class="num">2780</span> RW-data=<span class="num">192</span> ZI-data=<span class="num">16304</span>
+<span class="tag-green">0 Error(s), 0 Warning(s)</span></pre>
+
+<p style="margin-top:20px;color:#888;text-align:center;font-size:.85em;">— 文档结束 —</p>
+</div>
+
+</div>
+
+</body>
+</html>

@@ -1,0 +1,42 @@
+# Keil MDK-ARM
+MDK-ARM/**/Listings/
+MDK-ARM/**/Objects/
+MDK-ARM/**/*.dep
+MDK-ARM/**/*.crf
+MDK-ARM/**/*.d
+MDK-ARM/**/*.o
+MDK-ARM/**/*.axf
+MDK-ARM/**/*.hex
+MDK-ARM/**/*.bin
+MDK-ARM/**/*.map
+MDK-ARM/**/*.htm
+MDK-ARM/**/*.sct
+MDK-ARM/**/*.uvguix.*
+MDK-ARM/**/*.scvd
+MDK-ARM/**/*.bak
+MDK-ARM/**/*.JLink*
+MDK-ARM/**/*.lnk
+MDK-ARM/**/*.iex
+MDK-ARM/**/*.lnp
+MDK-ARM/**/*.lst
+MDK-ARM/DebugConfig/
+
+# STM32CubeMX backup / temporary
+.mxproject
+*.ioc.bak
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# User config (WiFi SSID/password, API keys)
+Core/Inc/config.h
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+
